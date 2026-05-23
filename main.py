@@ -1,32 +1,37 @@
 from types import Value
 
-
 if __name__ == "__main__":
-    if __name__ == "__main__":
-        print("--- Running Forward Pass ---")
+    print("--- Simulating One Neuron with Tanh Activation ---")
 
-        # 1. Define our initial inputs/weights
-        a = Value(2.0)
-        b = Value(-3.0)
-        d = Value(4.0)
+    # Inputs (x1, x2)
+    x1 = Value(2.0)
+    x2 = Value(0.0)
 
-        # 2. Compute a dynamic expression: c = a * b * d
-        # Python executes this as:
-        # step1 = a * b
-        # c = step1 * d
-        c = a * b * d
+    # Weights (w1, w2) - these represent what the network learns
+    w1 = Value(-3.0)
+    w2 = Value(1.0)
 
-        print(f"Input a: {a.data}")
-        print(f"Input b: {b.data}")
-        print(f"Input d: {d.data}")
-        print(f"Output c (result of a * b * d): {c.data}\n")
+    # Bias of the neuron (b)
+    b = Value(6.881373587019543)  # Specific number chosen for clean outputs
 
-        print("--- Running Backward Pass ---")
-        # 3. Call backward on the final output node
-        c.backward()
+    # Step 1: Multiply inputs by weights and sum them up
+    x1w1 = x1 * w1
+    x2w2 = x2 * w2
+    x1w1_plus_x2w2 = x1w1 + x2w2
 
-        print("--- Calculated Gradients (Sensitivities) ---")
-        print(f"dc/dc (Should be 1.0): {c.grad}")
-        print(f"dc/dd (Should be a*b = -6.0): {d.grad}")
-        print(f"dc/db (Should be a*d = 8.0): {b.grad}")
-        print(f"dc/da (Should be b*d = -12.0): {a.grad}")
+    # Step 2: Add the bias (Pre-activation output)
+    n = x1w1_plus_x2w2 + b
+
+    # Step 3: Pass through our brand new activation function (Post-activation output)
+    output = n.tanh()
+
+    # Run backpropagation
+    output.backward()
+
+    print(f"Neuron Raw Sum (n): {n.data:.4f}")
+    print(f"Squashed Output   : {output.data:.4f}\n")
+
+    print("--- Gradients Flowed All the Way Back ---")
+    print(f"Weight 1 Gradient (dOut/dw1): {w1.grad:.4f} (Should be ~0.7000)")
+    print(f"Weight 2 Gradient (dOut/dw2): {w2.grad:.4f} (Should be ~0.0000)")
+    print(f"Bias Gradient     (dOut/db) : {b.grad:.4f} (Should be ~0.5000)")
