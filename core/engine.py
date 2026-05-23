@@ -1,3 +1,4 @@
+# core/engine
 import math
 
 
@@ -12,17 +13,26 @@ class Value:
     # Basic operations
 
     def __pow__(self, other):
-        assert isinstance(other, (int, float)), (
-            "Only supporting int/float powers for now"
-        )
-        out = Value(self.data**other, (self,), f"**{other}")
+        if isinstance(other, (int, float)):
+            out = Value(self.data**other, (self,), f"**{other}")
 
-        def _backward():
-            self.grad += out.grad * (other * (self.data ** (other - 1)))
+            def _backward():
+                self.grad += (other * (self.data ** (other - 1))) * out.grad
 
-        out._backward = _backward
+            out._backward = _backward
+            return out
+        elif isinstance(other, Value):
+            out = Value(self.data**other.data, (self, other), "**")
 
-        return out
+            if self.data <= 0:
+                raise ValueError("Base must be positive for variable exponents")
+
+            def _backward():
+                self.grad += (other.data * (self.data ** (other.data - 1))) * out.grad
+                other.grad += (out.data * math.log(self.data)) * out.grad
+
+            out._backward = _backward
+            return out
 
     def __add__(self, other):
         other = other if isinstance(other, Value) else Value(other)
