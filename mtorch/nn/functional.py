@@ -1,4 +1,4 @@
-# mtorch/nn/function.py
+# mtorch/nn/functional.py
 import numpy as np
 
 from mtorch.tensor import Tensor
@@ -14,11 +14,12 @@ def softmax_cross_entropy(logits, targets):
 
     loss_data = -np.sum(targets.data * np.log(probs + 1e-15)) / batch_size
 
-    out = Tensor(loss_data, (logits, targets), "softmax_cross_entropy")
+    out = Tensor(
+        loss_data, (logits, targets), "softmax_cross_entropy", requires_grad=True
+    )
 
     def _backward():
-
-        logits.grad += ((probs - targets.data) / batch_size) * out.grad
+        logits._accumulate_grad(((probs - targets.data) / batch_size) * out.grad)
 
     out._backward = _backward
 
