@@ -1,3 +1,4 @@
+# mtorch/tensor.py
 import numpy as np
 
 
@@ -115,6 +116,17 @@ class Tensor:
                     shape[ax] = 1
                 g = g.reshape(shape)
             self.grad += np.ones_like(self.data) * g
+
+        out._backward = _backward
+        return out
+
+    def relu(self):
+        """Element-wise Rectified Linear Unit activation function"""
+        out = Tensor(np.maximum(0, self.data), (self,), "ReLU")
+
+        def _backward():
+            # Mask gradients to zero where the original forward activation was negative
+            self.grad += (self.data > 0) * out.grad
 
         out._backward = _backward
         return out
