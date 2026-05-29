@@ -1,4 +1,3 @@
-# mtorch/nn/functional.py
 import numpy as np
 
 from mtorch.tensor import Tensor

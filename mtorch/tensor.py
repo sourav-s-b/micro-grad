@@ -1,9 +1,9 @@
-# mtorch/tensor.py
 import numpy as np
 
 
 class Tensor:
-    def __init__(self, data, _children=(), _op="", requires_grad=True) -> None:
+
+    def __init__(self, data, _children=(), _op="", requires_grad=True):
         self.data = np.array(data, dtype=np.float64)
         self.grad = None
         self._prev = tuple(_children)
@@ -11,15 +11,8 @@ class Tensor:
         self._backward = lambda: None
         self.requires_grad = requires_grad
 
-    def _accumulate_grad(self, g):
-        if not self.requires_grad:
-            return
-        if self.grad is None:
-            self.grad = np.zeros_like(self.data)
-        self.grad += g
-
     def zero_grad(self):
-        if self.grad is not None:
+        if self.requires_grad:
             self.grad = np.zeros_like(self.data)
 
     @property
@@ -29,101 +22,134 @@ class Tensor:
     @property
     def T(self):
         out = Tensor(
-            self.data.T.copy(), (self,), "transpose", requires_grad=self.requires_grad
+            np.swapaxes(self.data, -1, -2).copy(),
+            (self,),
+            _op="transpose",
+            requires_grad=self.requires_grad,
         )
 
-        def _backward():
-            if out.grad is None:
-                return
-            self._accumulate_grad(out.grad.T)
+        if self.requires_grad:
 
-        out._backward = _backward
+            def _backward():
+                if out.grad is None:
+                    return
+                self._accumulate_grad(np.swapaxes(out.grad, -1, -2))
+
+            out._backward = _backward
+
         return out
 
     def __pow__(self, power):
         assert isinstance(power, (int, float))
 
         out = Tensor(
-            self.data**power, (self,), f"**{power}", requires_grad=self.requires_grad
+            self.data**power,
+            (self,),
+            _op=f"**{power}",
+            requires_grad=self.requires_grad,
         )
 
-        def _backward():
-            if out.grad is None:
-                return
-            self_grad = (power * self.data ** (power - 1)) * out.grad
-            self._accumulate_grad(self._match_shape(self_grad, self.shape))
+        if self.requires_grad:
+           
 
-        out._backward = _backward
+            def _backward():
+                if out.grad is None:
+                    return
+                grad = (power * self.data ** (power - 1)) * out.grad
+                self._accumulate_grad(grad)
+
+            out._backward = _backward
         return out
 
     def __add__(self, other):
         other = (
             other if isinstance(other, Tensor) else Tensor(other, requires_grad=False)
         )
+        requires_grad = self.requires_grad or other.requires_grad
+
         out = Tensor(
-            self.data + other.data, (self, other), "+", requires_grad=self.requires_grad or other.requires_grad
+            self.data + other.data, (self, other), "+", requires_grad=requires_grad
         )
 
-        def _backward():
-            if out.grad is None:
-                return
-            self._accumulate_grad(self._match_shape(out.grad, self.shape))
-            other._accumulate_grad(self._match_shape(out.grad, other.shape))
+        if requires_grad:
 
-        out._backward = _backward
+            def _backward():
+                if out.grad is None:
+                    return
+                self._accumulate_grad(self._match_shape(out.grad, self.shape))
+                other._accumulate_grad(self._match_shape(out.grad, other.shape))
 
+            out._backward = _backward
         return out
 
     def __matmul__(self, other):
         other = (
             other if isinstance(other, Tensor) else Tensor(other, requires_grad=False)
         )
+
+        requires_grad = self.requires_grad or other.requires_grad
+
         out = Tensor(
-            self.data @ other.data, (self, other), "@", requires_grad=self.requires_grad or other.requires_grad
+            self.data @ other.data, (self, other), _op="@", requires_grad=requires_grad
         )
 
-        def _backward():
-            if out.grad is None:
-                return
-            self._accumulate_grad(out.grad @ other.data.T)
-            other._accumulate_grad(self.data.T @ out.grad)
+        if requires_grad:
 
-        out._backward = _backward
+            def _backward():
+                if out.grad is None:
+                    return
+                g_self = out.grad @ np.swapaxes(other.data, -1, -2)
+                g_other = np.swapaxes(self.data, -1, -2) @ out.grad
+
+                self._accumulate_grad(self._match_shape(g_self, self.shape))
+                other._accumulate_grad(self._match_shape(g_other, other.shape))
+
+            out._backward = _backward
+
         return out
 
     def __mul__(self, other):
         other = (
             other if isinstance(other, Tensor) else Tensor(other, requires_grad=False)
         )
+
+        requires_grad = self.requires_grad or other.requires_grad
+
         out = Tensor(
-            other.data * self.data, (self, other), "*", requires_grad=self.requires_grad or other.requires_grad
+            self.data * other.data, (self, other), _op="*", requires_grad=requires_grad
         )
 
-        def _backward():
-            if out.grad is None:
-                return
-            self_grad = other.data * out.grad
-            other_grad = self.data * out.grad
+        if requires_grad:
 
-            self._accumulate_grad(self._match_shape(self_grad, self.shape))
-            other._accumulate_grad(self._match_shape(other_grad, other.shape))
+            def _backward():
+                if out.grad is None:
+                    return
+                g_self = other.data * out.grad
+                g_other = self.data * out.grad
+                self._accumulate_grad(self._match_shape(g_self, self.shape))
+                other._accumulate_grad(self._match_shape(g_other, other.shape))
 
-        out._backward = _backward
-
+            out._backward = _backward
         return out
 
     def __sub__(self, other):
         return self + (-other)
 
-    def __neg__(self):
-        out = Tensor(-self.data, (self,), "neg", requires_grad=self.requires_grad)
+    def __neg__(
+        self,
+    ):
 
-        def _backward():
-            if out.grad is None:
-                return
-            self._accumulate_grad(-out.grad)
+        out = Tensor(-self.data, (self,), _op="neg", requires_grad=self.requires_grad)
 
-        out._backward = _backward
+        if self.requires_grad:
+
+            def _backward():
+                if out.grad is None:
+                    return
+                self._accumulate_grad(-out.grad)
+
+            out._backward = _backward
+
         return out
 
     def __radd__(self, other):
@@ -133,8 +159,9 @@ class Tensor:
         return self * other
 
     def __rsub__(self, other):
-        if not isinstance(other, Tensor):
-            other = Tensor(other, requires_grad=False)
+        other = (
+            other if isinstance(other, Tensor) else Tensor(other, requires_grad=False)
+        )
         return other - self
 
     def __truediv__(self, other):
@@ -143,6 +170,8 @@ class Tensor:
     def __rtruediv__(self, other):
         return other * (self**-1)
 
+    # util functions
+
     def sum(self, axis=None, keepdims=False):
         out = Tensor(
             self.data.sum(axis=axis, keepdims=keepdims),
@@ -150,134 +179,161 @@ class Tensor:
             "sum",
             requires_grad=self.requires_grad,
         )
+        
+        if self.requires_grad:
 
-        def _backward():
-
-            if out.grad is None:
-                return
-            g = out.grad
-            if not keepdims and axis is not None:
-                axes = (axis,) if isinstance(axis, int) else axis
-                shape = list(self.shape)
-                for ax in axes:
-                    shape[ax] = 1
-                g = g.reshape(shape)
-            self._accumulate_grad(np.ones_like(self.data) * g)
-
-        out._backward = _backward
+            def _backward():
+                g = out.grad
+                if g is None:
+                    return
+                if not keepdims and axis is not None:
+                    axes = (axis,) if isinstance(axis,int) else axis
+                    shape = list(self.shape)
+                    axes = tuple(
+                        ax if ax >= 0 else ax + len(self.shape) for ax in axes
+                    )
+                    for ax in axes:
+                        shape[ax] = 1
+                    g = g.reshape(shape)
+                self._accumulate_grad(np.ones_like(self.data) * g)
+            out._backward = _backward
         return out
 
-    def mean(self, axis=None, keepdims=False):
+    def mean(self, axis= None, keepdims= False):
         out = Tensor(
             self.data.mean(axis=axis, keepdims=keepdims),
             (self,),
             "mean",
             requires_grad=self.requires_grad,
         )
+        
+        if self.requires_grad:
 
-        def _backward():
-            if out.grad is None:
-                return
-            num_elements = (
-                self.data.size if axis is None else np.prod(np.array(self.shape)[axis])
-            )
-            g = out.grad
-            if not keepdims and axis is not None:
-                axes = (axis,) if isinstance(axis, int) else axis
-                shape = list(self.shape)
-                for ax in axes:
-                    shape[ax] = 1
-                g = g.reshape(shape)
-            self._accumulate_grad((np.ones_like(self.data) * g) / num_elements)
+            def _backward():
+                g = out.grad
+                if g is None:
+                    return
 
-        out._backward = _backward
+                if axis is None:
+                    num_elements = self.data.size
+                else:
+                    axes = (axis, ) if isinstance(axis, int) else axis
+                    num_elements = np.prod([self.shape[a] for a in axes])
+
+                if not keepdims and axis is not None:
+                    axes = (axis,) if isinstance(axis,int) else axis
+                    shape = list(self.shape)
+                    axes = tuple(
+                        ax if ax >= 0 else ax + len(self.shape) for ax in axes
+                    )
+                    for ax in axes:
+                        shape[ax] = 1
+                    g = g.reshape(shape)
+                self._accumulate_grad(( np.ones_like(self.data) * g ) / num_elements )
+            out._backward = _backward
         return out
 
-    def max(self, axis=None, keepdims=False):
-        out_data = self.data.max(axis, keepdims=keepdims)
-        out = Tensor(out_data, (self,), "max", requires_grad=self.requires_grad)
 
-        def _backward():
-            if out.grad is None:
-                return
-            g = out.grad
-            if not keepdims and axis is not None:
-                axes = (axis,) if isinstance(axis, int) else axis
-                shape = list(self.shape)
-                for ax in axes:
-                    shape[ax] = 1
-                g = g.reshape(shape)
-            mask = self.data == self.data.max(axis=axis, keepdims=True)
-            mask = mask / mask.sum(axis=axis, keepdims=True)
-            self._accumulate_grad(mask * g)
-
-        out._backward = _backward
-        return out
-
-    # Activation Functions
-    def log(self):
+    def max(self, axis= None, keepdims= False):
         out = Tensor(
-            np.log(self.data + 1e-15), (self,), "log", requires_grad=self.requires_grad
+            self.data.max(axis=axis, keepdims=keepdims),
+            (self,),
+            "max",
+            requires_grad=self.requires_grad,
         )
+        
+        if self.requires_grad:
 
-        def _backward():
-            if out.grad is None:
-                return
-            self._accumulate_grad(out.grad / (self.data + 1e-15))
+            def _backward():
+                g = out.grad
+                if g is None:
+                    return
+                axes = (axis,) if isinstance(axis, int) else axis
+                if axes is not None:
+                    axes = tuple(
+                        ax if ax >= 0 else ax + len(self.shape)
+                        for ax in axes
+                    )
 
-        out._backward = _backward
+                max_vals = out.data
+
+                if not keepdims and axes is not None:
+                    shape = list(self.shape)
+                    for ax in axes:
+                        shape[ax] = 1
+                    max_vals = max_vals.reshape(shape)
+                    g = g.reshape(shape)
+
+                mask = self.data == max_vals
+                mask = mask / mask.sum(axis=axes, keepdims=True)
+
+                self._accumulate_grad(mask * g)
+            out._backward = _backward
+        return out
+
+    # activation function
+
+    def log(self):
+        out = Tensor( np.log(self.data + 1e-15), (self,), 'log', requires_grad= self.requires_grad)
+
+        if self.requires_grad:
+            def _backward():
+                if out.grad is None:
+                    return
+                self._accumulate_grad(out.grad / (self.data + 1e-15))
+
+            out._backward = _backward
+
         return out
 
     def exp(self):
-        out = Tensor(
-            np.exp(self.data), (self,), "exp", requires_grad=self.requires_grad
-        )
+        out = Tensor(np.exp(self.data), (self,) , 'exp' , requires_grad=self.requires_grad)
 
-        def _backward():
-            if out.grad is None:
-                return
+        if self.requires_grad:
+            def _backward():
+                if out.grad is None:
+                    return
+                self._accumulate_grad(out.grad * out.data)
 
-            self._accumulate_grad(out.data * out.grad)
+            out._backward = _backward
 
-        out._backward = _backward
         return out
-
+    
     def sigmoid(self):
-        res = 1.0 / (1.0 + np.exp(-np.clip(self.data, -500, 500)))
-        out = Tensor(res, (self,), "sigmoid", requires_grad=self.requires_grad)
+        res = 1.0 / (1.0 + np.exp(-np.clip(self.data , -500, 500)))
+        out = Tensor(res, (self,) , 'sigmoid' , requires_grad=self.requires_grad)
 
-        def _backward():
-            if out.grad is None:
-                return
-            self._accumulate_grad(out.data * (1.0 - out.data) * out.grad)
-
-        out._backward = _backward
+        if self.requires_grad:
+            def _backward():
+                if out.grad is None:
+                    return
+                self._accumulate_grad(out.grad * out.data *  (1 - out.data) )
+            out._backward = _backward
         return out
 
     def tanh(self):
-        res = np.tanh(self.data)
-        out = Tensor(res, (self,), "tanh", requires_grad=self.requires_grad)
+        out = Tensor(np.tanh(self.data), (self,) , 'tanh' , requires_grad= self.requires_grad)
 
-        def _backward():
-            if out.grad is None:
-                return
-            self._accumulate_grad((1.0 - res**2) * out.grad)
+        if self.requires_grad:
+            def _backward():
+                if out.grad is None:
+                    return
+                self._accumulate_grad((1 - out.data ** 2) * out.grad)
 
-        out._backward = _backward
+            out._backward = _backward
+
         return out
 
     def relu(self):
-        """Element-wise Rectified Linear Unit activation function"""
-        out = Tensor(
-            np.maximum(0, self.data), (self,), "ReLU", requires_grad=self.requires_grad
-        )
+        out = Tensor(np.maximum(0, self.data),(self,) , 'ReLU' , requires_grad= self.requires_grad)
 
-        def _backward():
-            if out.grad is None:
-                return
-            self._accumulate_grad((self.data > 0) * out.grad)
+        if self.requires_grad:
+            def _backward():
+                if out.grad is None:
+                    return 
+                self._accumulate_grad((self.data > 0) * out.grad)
+            out._backward = _backward
 
-        out._backward = _backward
         return out
 
     def reshape(self, *shape):
@@ -290,39 +346,57 @@ class Tensor:
             requires_grad=self.requires_grad,
         )
 
-        def _backward():
-            if out.grad is None:
-                return
-            self._accumulate_grad(out.grad.reshape(self.shape))
+        if self.requires_grad:
+            def _backward():
+                if out.grad is None:
+                    return
+                self._accumulate_grad(out.grad.reshape(self.shape))
 
-        out._backward = _backward
+            out._backward = _backward
         return out
+
+
 
     def backward(self):
         if not self.requires_grad:
             return
         if self.data.size != 1:
             raise RuntimeError("Grad can only be implicitly created for scalar outputs")
+
         topo = []
         visited = set()
 
-        def build_topo(v):
+        def _build_topo(v):
             if v not in visited:
                 visited.add(v)
                 for child in v._prev:
-                    build_topo(child)
+                    _build_topo(child)
                 topo.append(v)
 
-        build_topo(self)
+        _build_topo(self)
 
         self.grad = np.ones_like(self.data)
 
         for node in reversed(topo):
             node._backward()
 
+    def _accumulate_grad(self, grad):
+        if not self.requires_grad:
+            return
+        if self.grad is None:
+            self.grad = np.zeros_like(self.data)
+        if grad.shape != self.data.shape:
+            raise ValueError(
+                f"Gradient shape {grad.shape} "
+                f"does not match tensor shape {self.data.shape}"
+            )
+        self.grad += grad
+
     def _match_shape(self, grad, target_shape):
         if grad.shape == target_shape:
             return grad
+        if target_shape == ():
+            return np.array(grad.sum())
 
         grad_ndim = grad.ndim
         target_ndim = len(target_shape)
@@ -338,8 +412,7 @@ class Tensor:
         )
         if axes_to_sum:
             grad = grad.sum(axis=axes_to_sum, keepdims=True)
-
-        return grad.reshape(target_shape)
+        return grad
 
     def __repr__(self):
-        return f"Tensor(shape={self.shape}, data=\n{self.data})"
+        return f"Tensor(shape={self.shape}, data=\n{self.data}), op={self._op}"
