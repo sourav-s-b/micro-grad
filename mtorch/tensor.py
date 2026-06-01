@@ -3,6 +3,8 @@ import numpy as np
 
 class Tensor:
 
+    __array_priority = 1000
+
     def __init__(self, data, _children=(), _op="", requires_grad=True):
         self.data = np.array(data, dtype=np.float64)
         self.grad = None
@@ -169,6 +171,21 @@ class Tensor:
 
     def __rtruediv__(self, other):
         return other * (self**-1)
+
+    def __getitem__(self, idx):
+
+        out = Tensor(self.data[idx] , (self,) , 'getitem' , requires_grad=self.requires_grad)
+
+        def _backward():
+            if out.grad is None or not self.requires_grad: return
+
+            dx = np.zeros_like(self.data)
+            dx[idx] = out.grad
+
+            self._accumulate_grad(dx)
+
+        out._backward = _backward
+        return out
 
     # util functions
 
@@ -414,5 +431,7 @@ class Tensor:
             grad = grad.sum(axis=axes_to_sum, keepdims=True)
         return grad
 
+
     def __repr__(self):
         return f"Tensor(shape={self.shape}, data=\n{self.data}), op={self._op}"
+

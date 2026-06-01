@@ -282,6 +282,83 @@ class MaxPool2D(Module):
         out._backward = _backward
         return out
 
+class Embedding(Module):
+
+    def __init__(self, num_embeddings, embedding_dim):
+
+        super().__init__()
+
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+
+        self.w = Tensor(np.random.randn(num_embeddings, embedding_dim) *0.01, requires_grad=True)
+
+    def __call__(self, indices):
+
+        idx_array = indices.data.astype(int)
+
+        out_data = self.w.data[idx_array]
+
+        out = Tensor(out_data, (self.w, indices), "Embedding", requires_grad=self.w.requires_grad)
+
+        def _backward():
+            if out.grad is None:
+                return
+            if out.requires_grad is None or not self.w.requires_grad: return
+
+            dW = np.zeros_like(self.w.data)
+
+            flat_idx = idx_array.reshape(-1)
+            flat_grad = out.grad.reshape(-1, self.embedding_dim)
+
+            np.add.at(dW, flat_idx, flat_grad)
+            self.w._accumulate_grad(dW)
+
+        out._backward = _backward
+        return out
+
+    def parameters(self):
+        return [self.w]
+
+class LayerNorm(Module):
+
+    def __init__(self, dim, eps = 1e-5):
+        super().__init__()
+        self.eps = eps
+        self.gamma = Tensor(np.ones(dim), requires_grad=True)
+        self.beta = Tensor(np.zeros(dim), requires_grad=True)
+    
+    def __call__(self, x):
+        mean = x.data.mean(axis=-1, keepdims=True)
+        var = x.data.var(axis= -1, keepdims=True)
+
+        x_norm = (x.data - mean)/ np.sqrt(var + self.eps)
+        out_data = self.gamma.data * x_norm + self.beta.data
+
+        out = Tensor(out_data, (x, self.gamma, self.beta), 'LayerNorm', requires_grad=True)
+
+        def _backward():
+            if out.grad is None:
+                return
+            
+            if self.gamma.requires_grad:
+                self.gamma._accumulate_grad((out.grad * x_norm).sum(axis = (0,1)))
+            if self.beta.requires_grad:
+                self.beta._accumulate_grad((out.grad * x_norm).sum(axis = (0,1)))
+            if x.requires_grad:
+
+                N = x.data.shape[-1]
+                g = out.grad * self.gamma.data
+
+                dx = (1.0 / np.sqrt(var + self.eps)) * (
+                        g - (g.mean(axis=-1, keepdims = True)) - x_norm * (g * x_norm).mean(axis=-1, keepdims=True)
+                    )
+                x._accumulate_grad(dx)
+        out._backward = _backward
+        return out
+
+    def parameters(self):
+        return [self.gamma, self.beta]
 
 def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
@@ -304,7 +381,7 @@ class LSTM(Module):
 
     def __call__(self, x):
         assert isinstance(x, Tensor)
-        b, t, seq_in_dim = x.shape
+        b, t, _ = x.shape
         h_dim = self.hidden_dim
 
         h_states = np.zeros((b, t, h_dim))
@@ -361,9 +438,9 @@ class LSTM(Module):
 
             for step in reversed(range(t)):
 
-                z , f , i , c_tilde, o , c_curr, tanh_c , c_prev = cache[step]
+                z , f , i , c_tilde, o , c_curr, tanh_c ,h_prev, c_prev = cache[step]
 
-                dh = out.grad[:, : step, :] + dh_next
+                dh = out.grad[:, step, :] + dh_next
 
                 do_pre = dh * tanh_c * o * (1.0 - o)
 
@@ -395,7 +472,57 @@ class LSTM(Module):
                 self.B._accumulate_grad(dB)
 
             if x.requires_grad:
-                x._accumulate_grad(x)
+                x._accumulate_grad(dx)
 
         out._backward = _backward
+        
         return out
+
+    def step(self, x_t, state=None):
+        
+        if isinstance(x_t, Tensor):
+            x_arr  = x_t.data
+        else:
+            x_arr = x_t
+
+        if len(x_arr.shape) == 3:
+            x_step = x_arr[:, 0,:]
+        else:
+            x_step = x_arr
+
+       
+        b = x_step.shape[0]
+        h_dim = self.hidden_dim
+
+        if state is None:
+            h_prev = np.zeros((b,h_dim))
+            c_prev = np.zeros((b,h_dim))
+
+        else:
+            h_prev , c_prev = state
+
+
+
+
+        z = np.hstack((x_step, h_prev))
+        gates_pre = z @ self.W.data + self.B.data
+
+        f_pre = gates_pre[:, 0:h_dim]
+        i_pre = gates_pre[:, h_dim : 2 * h_dim]
+        c_pre = gates_pre[:, 2 * h_dim : 3 * h_dim]
+        o_pre = gates_pre[:, 3 * h_dim : 4 * h_dim]
+
+        f = _sigmoid(f_pre)
+        i = _sigmoid(i_pre)
+
+        c_tilde = np.tanh(c_pre)
+        o = _sigmoid(o_pre)
+
+        c_curr = f * c_prev + i * c_tilde
+        tanh_c = np.tanh(c_curr)
+        h_curr = o * tanh_c
+
+        return h_curr, (h_curr, c_curr)
+
+    def parameters(self):
+        return [self.W, self.B]
