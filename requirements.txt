@@ -2,4 +2,4 @@ scikit-learn
 datasets
 Pillow
 # this depends on your version of cuda toolkit you have on your system
-cupy-cuda12x
+cupy-cuda13x

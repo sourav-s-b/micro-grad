@@ -16,7 +16,7 @@ def set_device(name):
             cp.cuda.Device(0).use()
             Device.xp = cp
             Device.device = "cuda"
-            print(f"Backend Device: changed to ${Device.device}")
+            print(f"Backend Device: changed to {Device.device}")
         except Exception as e:
             print(f"Warning: CUDA requested but initialization failed ({e}).")
             print("Falling back to NumPy / CPU mode.")

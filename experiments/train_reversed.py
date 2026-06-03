@@ -4,6 +4,9 @@ from mtorch import cross_entropy_loss
 from mtorch import LSTM, Embedding, Linear, Module
 from mtorch import Adam
 from mtorch import Tensor
+from mtorch.config import set_device, to_cpu
+
+set_device("cpu")
 
 chars = list("abcdefghijklmnopqrstuvwxyz")
 vocab = {c: i for i, c in enumerate(chars)}
@@ -97,7 +100,7 @@ class Seq2Seq(Module):
             h_tensor = Tensor(h_curr.reshape(B, 1, -1), requires_grad=False)
             logits = self.fc(h_tensor)
 
-            next_token = int(np.argmax(logits.data[0, 0]))
+            next_token = int(to_cpu(np.argmax(logits.data[0, 0])))
 
             if next_token == vocab["<EOS>"]:
                 break
@@ -156,7 +159,7 @@ for epoch in range(epoch_range):
         loss.backward()
         optimizer.step()
 
-        epoch_loss += loss.data
+        epoch_loss += to_cpu(loss.data).item()
         batches += 1
 
     print(f"Epoch {epoch+1}/{epoch_range} | Avg Loss: {epoch_loss/batches: .4f}")

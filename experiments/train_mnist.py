@@ -7,6 +7,10 @@ from mtorch.nn.functional import softmax_cross_entropy
 from mtorch.optim import optimizer
 from mtorch.utils.data import DataLoader, Dataset
 
+from mtorch.config import set_device, to_cpu
+
+# set_device("cuda")
+
 
 class ImageDataset(Dataset):
 
@@ -66,6 +70,9 @@ class CNN(Sequential):
 model = CNN()
 optimizer = Adam(model.parameters(), lr=0.005)
 
+test_loader = DataLoader(test_dataset, shuffle=False)
+Y_test_labels = test_dataset.y
+
 for epoch in range(15):
     model.train()
     epoch_loss, batches = 0.0, 0
@@ -78,20 +85,26 @@ for epoch in range(15):
         loss.backward()
         optimizer.step()
 
-        epoch_loss += loss.data
+        epoch_loss += to_cpu(loss.data).item()
         batches += 1
 
     # Validation Check
     model.eval()
-    Y_test_onehot = np.array([test_dataset[i][1] for i in range(len(test_dataset))])
+    correct_preds = 0
+    total_samples = 0
 
-    test_logits = model(Tensor(test_dataset.X, requires_grad=False))
-    _, test_probs = softmax_cross_entropy(
-        test_logits, Tensor(Y_test_onehot, requires_grad=False)
-    )
+    for X_batch, Y_batch in test_loader:
+        logits = model(X_batch)
 
-    preds = np.argmax(test_probs, axis=-1)
-    accuracy = np.mean(preds == test_dataset.y) * 100
+        preds = np.argmax(to_cpu(logits.data), axis=-1)
+
+        true_labels = np.argmax(to_cpu(Y_batch.data), axis=-1)
+
+        correct_preds += np.sum(preds == true_labels)
+        total_samples += len(preds)
+
+    accuracy = (correct_preds / total_samples) * 100
+
     print(
         f"Epoch {epoch+1:02d} / 15 | Train Loss: {epoch_loss/batches:.4f} | Val Accuracy: {accuracy:.2f}%"
     )

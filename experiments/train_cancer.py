@@ -24,7 +24,7 @@ class CancerDataset(Dataset):
         return len(self.X)
 
     def __getitem__(self, idx):
-        one_hot = Device.xp.zeros(2)
+        one_hot = np.zeros(2)
         one_hot[self.y[idx]] = 1.0
         return self.X[idx], one_hot
 
@@ -84,5 +84,5 @@ for epoch in range(epoch_range):
     accuracy = np.mean(preds == y_test) * 100
 
     print(
-        f"Epoch {epoch+1} / 15 | Average Loss: {epoch_loss/batches:4f} | Validation Accuracy: {accuracy: .3f}"
+        f"Epoch {epoch+1} / {epoch_range} | Average Loss: {epoch_loss/batches:4f} | Validation Accuracy: {accuracy: .3f}"
     )

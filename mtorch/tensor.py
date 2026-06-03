@@ -6,7 +6,7 @@ class Tensor:
     __array_priority = 1000
 
     def __init__(self, data, _children=(), _op="", requires_grad=True):
-        self.data = Device.xp.array(data, dtype=Device.xp.float64)
+        self.data = Device.xp.array(data, dtype=Device.xp.float32)
         self.grad = None
         self._prev = tuple(_children)
         self._op = _op

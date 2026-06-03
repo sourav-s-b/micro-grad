@@ -47,29 +47,27 @@ class Conv2D(Module):
                     (self.padding, self.padding),
                 ),
             )
+        b, c, hp, wp = x_data.shape
+        out_h = (hp - kh) // self.stride + 1
+        out_w = (wp - kw) // self.stride + 1
 
-        out_h = (h + 2 * self.padding - kh) // self.stride + 1
-        out_w = (w + 2 * self.padding - kw) // self.stride + 1
+        shape = (b, c, out_h, out_w, kh, kw)
+        strides = (
+            x_data.strides[0],
+            x_data.strides[1],
+            x_data.strides[2] * self.stride,
+            x_data.strides[3] * self.stride,
+            x_data.strides[2],
+            x_data.strides[3],
+        )
 
-        out_data = Device.xp.zeros((b, self.out_channels, out_h, out_w))
+        windows = Device.xp.lib.stride_tricks.as_strided(
+            x_data, shape=shape, strides=strides
+        )
 
-        for y in range(out_h):
-            for xi in range(out_w):
-                patch = x_data[
-                    :,
-                    :,
-                    y * self.stride : y * self.stride + kh,
-                    xi * self.stride : xi * self.stride + kw,
-                ]
+        out_data = Device.xp.einsum("bchwkl, ockl->bohw", windows, self.W.data)
 
-                out_data[:, :, y, xi] = (
-                    patch.reshape(b, 1, -1)
-                    * self.W.data.reshape(1, self.out_channels, -1)
-                ).sum(axis=2)
-
-        out_data += self.B.data[
-            Device.xp.newaxis, :, Device.xp.newaxis, Device.xp.newaxis
-        ]
+        out_data += self.B.data.reshape(1, -1, 1, 1)
 
         out_tensor = Tensor(out_data, (x, self.W, self.B), "Conv2D")
 
@@ -77,57 +75,35 @@ class Conv2D(Module):
             if out_tensor.grad is None:
                 return
 
-            x_data_pad = x.data
-            if self.padding > 0:
-                x_data_pad = Device.xp.pad(
-                    x.data,
-                    (
-                        (0, 0),
-                        (0, 0),
-                        (self.padding, self.padding),
-                        (self.padding, self.padding),
-                    ),
-                )
+            if self.W.requires_grad:
+                dw = Device.xp.einsum("bohw,bchwkl->ockl", out_tensor.grad, windows)
+                self.W._accumulate_grad(dw)
 
-            dx_pad = Device.xp.zeros_like(x_data_pad) if x.requires_grad else None
-            dw = Device.xp.zeros_like(self.W.data) if self.W.requires_grad else None
+            if self.B.requires_grad:
+                self.B._accumulate_grad(out_tensor.grad.sum(axis=(0, 2, 3)))
 
-            for y in range(out_h):
-                for xi in range(out_w):
-                    g = out_tensor.grad[:, :, y, xi]
-                    patch = x_data_pad[
-                        :,
-                        :,
-                        y * self.stride : y * self.stride + kh,
-                        xi * self.stride : xi * self.stride + kw,
-                    ]
+            if x.requires_grad:
 
-                    if self.W.requires_grad:
+                dx_pad = Device.xp.zeros_like(x_data)
+                g = out_tensor.grad
+                w_data = self.W.data
 
-                        dw += Device.xp.einsum("bo,bchw->ochw", g, patch)
-
-                    if x.requires_grad:
-
-                        dx = Device.xp.einsum("bo,ochw->bchw", g, self.W.data)
+                for y in range(out_h):
+                    for xi in range(out_w):
+                        dx_patch = Device.xp.einsum(
+                            "bo,ockl->bckl", g[:, :, y, xi], w_data
+                        )
                         dx_pad[
                             :,
                             :,
                             y * self.stride : y * self.stride + kh,
                             xi * self.stride : xi * self.stride + kw,
-                        ] += dx
-
-            if self.W.requires_grad:
-                self.W._accumulate_grad(dw)
-
-            if x.requires_grad:
+                        ] += dx_patch
                 if self.padding > 0:
                     p = self.padding
                     x._accumulate_grad(dx_pad[:, :, p:-p, p:-p])
                 else:
                     x._accumulate_grad(dx_pad)
-
-            if self.B.requires_grad:
-                self.B._accumulate_grad(out_tensor.grad.sum(axis=(0, 2, 3)))
 
         out_tensor._backward = _backward
         return out_tensor
@@ -149,18 +125,9 @@ class MaxPool2D(Module):
         b, c, h, w = x.shape
         kh = kw = self.kernel_size
 
-        out_h = (h - kh) // self.stride + 1
-        out_w = (w - kw) // self.stride + 1
+        x_reshaped = x.data.reshape(b, c, h // kh, kh, w // kw, kw)
 
-        out_data = Device.xp.zeros((b, c, out_h, out_w))
-
-        for y in range(out_h):
-            for x_idx in range(out_w):
-                ys = y * self.stride
-                xs = x_idx * self.stride
-
-                patch = x.data[:, :, ys : ys + kh, xs : xs + kw]
-                out_data[:, :, y, x_idx] = Device.xp.max(patch, axis=(2, 3))
+        out_data = x_reshaped.max(axis=(3, 5))
 
         out = Tensor(out_data, (x,), "MaxPool2D", requires_grad=x.requires_grad)
 
@@ -172,21 +139,19 @@ class MaxPool2D(Module):
 
             if x.grad is None:
                 x.grad = Device.xp.zeros_like(x.data)
-            for y in range(out_h):
-                for x_idx in range(out_w):
-                    ys = y * self.stride
-                    xs = x_idx * self.stride
 
-                    patch = x.data[:, :, ys : ys + kh, xs : xs + kw]
-                    max_val = out.data[:, :, y, x_idx].reshape(b, c, 1, 1)
-                    mask = patch == max_val
+            out_repeated = Device.xp.repeat(
+                Device.xp.repeat(out.data, kh, axis=2), kw, axis=3
+            )
 
-                    mask = mask / (
-                        Device.xp.sum(mask, axis=(2, 3), keepdims=True) + 1e-8
-                    )
+            g_repeated = Device.xp.repeat(
+                Device.xp.repeat(out.grad, kh, axis=2), kw, axis=3
+            )
 
-                    g_slice = out.grad[:, :, y, x_idx].reshape(b, c, 1, 1)
-                    x.grad[:, :, ys : ys + kh, xs : xs + kw] += mask * g_slice
+            mask = (x.data == out_repeated).astype(Device.xp.float32)
+
+            dx = mask * g_repeated
+            x._accumulate_grad(dx)
 
         out._backward = _backward
         return out
