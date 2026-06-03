@@ -1,4 +1,4 @@
-import numpy as np
+from mtorch.config import Device
 
 
 class Tensor:
@@ -6,7 +6,7 @@ class Tensor:
     __array_priority = 1000
 
     def __init__(self, data, _children=(), _op="", requires_grad=True):
-        self.data = np.array(data, dtype=np.float64)
+        self.data = Device.xp.array(data, dtype=Device.xp.float64)
         self.grad = None
         self._prev = tuple(_children)
         self._op = _op
@@ -15,7 +15,7 @@ class Tensor:
 
     def zero_grad(self):
         if self.requires_grad:
-            self.grad = np.zeros_like(self.data)
+            self.grad = Device.xp.zeros_like(self.data)
 
     @property
     def shape(self):
@@ -24,7 +24,7 @@ class Tensor:
     @property
     def T(self):
         out = Tensor(
-            np.swapaxes(self.data, -1, -2).copy(),
+            Device.xp.swapaxes(self.data, -1, -2).copy(),
             (self,),
             _op="transpose",
             requires_grad=self.requires_grad,
@@ -35,7 +35,7 @@ class Tensor:
             def _backward():
                 if out.grad is None:
                     return
-                self._accumulate_grad(np.swapaxes(out.grad, -1, -2))
+                self._accumulate_grad(Device.xp.swapaxes(out.grad, -1, -2))
 
             out._backward = _backward
 
@@ -100,8 +100,8 @@ class Tensor:
             def _backward():
                 if out.grad is None:
                     return
-                g_self = out.grad @ np.swapaxes(other.data, -1, -2)
-                g_other = np.swapaxes(self.data, -1, -2) @ out.grad
+                g_self = out.grad @ Device.xp.swapaxes(other.data, -1, -2)
+                g_other = Device.xp.swapaxes(self.data, -1, -2) @ out.grad
 
                 self._accumulate_grad(self._match_shape(g_self, self.shape))
                 other._accumulate_grad(self._match_shape(g_other, other.shape))
@@ -179,7 +179,7 @@ class Tensor:
         def _backward():
             if out.grad is None or not self.requires_grad: return
 
-            dx = np.zeros_like(self.data)
+            dx = Device.xp.zeros_like(self.data)
             dx[idx] = out.grad
 
             self._accumulate_grad(dx)
@@ -212,7 +212,7 @@ class Tensor:
                     for ax in axes:
                         shape[ax] = 1
                     g = g.reshape(shape)
-                self._accumulate_grad(np.ones_like(self.data) * g)
+                self._accumulate_grad(Device.xp.ones_like(self.data) * g)
             out._backward = _backward
         return out
 
@@ -235,7 +235,7 @@ class Tensor:
                     num_elements = self.data.size
                 else:
                     axes = (axis, ) if isinstance(axis, int) else axis
-                    num_elements = np.prod([self.shape[a] for a in axes])
+                    num_elements = Device.xp.prod([self.shape[a] for a in axes])
 
                 if not keepdims and axis is not None:
                     axes = (axis,) if isinstance(axis,int) else axis
@@ -246,7 +246,7 @@ class Tensor:
                     for ax in axes:
                         shape[ax] = 1
                     g = g.reshape(shape)
-                self._accumulate_grad(( np.ones_like(self.data) * g ) / num_elements )
+                self._accumulate_grad(( Device.xp.ones_like(self.data) * g ) / num_elements )
             out._backward = _backward
         return out
 
@@ -291,7 +291,7 @@ class Tensor:
     # activation function
 
     def log(self):
-        out = Tensor( np.log(self.data + 1e-15), (self,), 'log', requires_grad= self.requires_grad)
+        out = Tensor( Device.xp.log(self.data + 1e-15), (self,), 'log', requires_grad= self.requires_grad)
 
         if self.requires_grad:
             def _backward():
@@ -304,7 +304,7 @@ class Tensor:
         return out
 
     def exp(self):
-        out = Tensor(np.exp(self.data), (self,) , 'exp' , requires_grad=self.requires_grad)
+        out = Tensor(Device.xp.exp(self.data), (self,) , 'exp' , requires_grad=self.requires_grad)
 
         if self.requires_grad:
             def _backward():
@@ -317,7 +317,7 @@ class Tensor:
         return out
     
     def sigmoid(self):
-        res = 1.0 / (1.0 + np.exp(-np.clip(self.data , -500, 500)))
+        res = 1.0 / (1.0 + Device.xp.exp(-Device.xp.clip(self.data , -500, 500)))
         out = Tensor(res, (self,) , 'sigmoid' , requires_grad=self.requires_grad)
 
         if self.requires_grad:
@@ -329,7 +329,7 @@ class Tensor:
         return out
 
     def tanh(self):
-        out = Tensor(np.tanh(self.data), (self,) , 'tanh' , requires_grad= self.requires_grad)
+        out = Tensor(Device.xp.tanh(self.data), (self,) , 'tanh' , requires_grad= self.requires_grad)
 
         if self.requires_grad:
             def _backward():
@@ -342,7 +342,7 @@ class Tensor:
         return out
 
     def relu(self):
-        out = Tensor(np.maximum(0, self.data),(self,) , 'ReLU' , requires_grad= self.requires_grad)
+        out = Tensor(Device.xp.maximum(0, self.data),(self,) , 'ReLU' , requires_grad= self.requires_grad)
 
         if self.requires_grad:
             def _backward():
@@ -392,7 +392,7 @@ class Tensor:
 
         _build_topo(self)
 
-        self.grad = np.ones_like(self.data)
+        self.grad = Device.xp.ones_like(self.data)
 
         for node in reversed(topo):
             node._backward()
@@ -401,7 +401,7 @@ class Tensor:
         if not self.requires_grad:
             return
         if self.grad is None:
-            self.grad = np.zeros_like(self.data)
+            self.grad = Device.xp.zeros_like(self.data)
         if grad.shape != self.data.shape:
             raise ValueError(
                 f"Gradient shape {grad.shape} "
@@ -413,7 +413,7 @@ class Tensor:
         if grad.shape == target_shape:
             return grad
         if target_shape == ():
-            return np.array(grad.sum())
+            return Device.xp.array(grad.sum())
 
         grad_ndim = grad.ndim
         target_ndim = len(target_shape)

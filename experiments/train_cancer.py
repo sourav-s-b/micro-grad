@@ -1,12 +1,17 @@
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-import numpy as np
 
 from mtorch import Sequential, Linear, Dropout, ReLU, Adam
 from mtorch.utils.data import DataLoader, Dataset
-from mtorch.nn.functional import softmax_cross_entropy
+from mtorch import softmax_cross_entropy
 from mtorch import Tensor
+import numpy as np
+
+
+from mtorch.config import set_device, Device, to_cpu
+
+set_device("cuda")
 
 
 class CancerDataset(Dataset):
@@ -19,7 +24,7 @@ class CancerDataset(Dataset):
         return len(self.X)
 
     def __getitem__(self, idx):
-        one_hot = np.zeros(2)
+        one_hot = Device.xp.zeros(2)
         one_hot[self.y[idx]] = 1.0
         return self.X[idx], one_hot
 
@@ -70,12 +75,12 @@ for epoch in range(epoch_range):
         batches += 1
 
     model.eval()
-    Y_test_onehot = np.array([test_data[i][1] for i in range(len(test_data))])
+    Y_test_onehot = Device.xp.array([test_data[i][1] for i in range(len(test_data))])
     Y_test_tensor = Tensor(Y_test_onehot, requires_grad=False)
 
     test_logits = model(Tensor(X_test, requires_grad=False))
     _, test_probs = softmax_cross_entropy(test_logits, Y_test_tensor)
-    preds = np.argmax(test_probs, axis=-1)
+    preds = to_cpu(Device.xp.argmax(test_probs, axis=-1))
     accuracy = np.mean(preds == y_test) * 100
 
     print(

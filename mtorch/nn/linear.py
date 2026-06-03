@@ -1,5 +1,4 @@
-import numpy as np
-
+from mtorch.config import Device
 from mtorch.nn.base import Module
 from mtorch.tensor import Tensor
 
@@ -9,12 +8,12 @@ class Linear(Module):
     def __init__(self, nin, nout):
         super().__init__()
 
-        bound = 1 / np.sqrt(nin)
+        bound = 1 / Device.xp.sqrt(nin)
 
         self.W = Tensor(
-            np.random.uniform(-bound, bound, (nin, nout)), requires_grad=True
+            Device.xp.random.uniform(-bound, bound, (nin, nout)), requires_grad=True
         )
-        self.B = Tensor(np.zeros((1, nout)), requires_grad=True)
+        self.B = Tensor(Device.xp.zeros((1, nout)), requires_grad=True)
 
     def __call__(self, x):
         return x @ self.W + self.B
@@ -31,7 +30,7 @@ class Dropout(Module):
 
     def __call__(self, x):
         if self.training and self.p > 0:
-            mask = (np.random.rand(*x.shape) >= self.p) / (1.0 - self.p)
+            mask = (Device.xp.random.rand(*x.shape) >= self.p) / (1.0 - self.p)
             mask_np = Tensor(mask, requires_grad=False)
             return x * mask_np
         return x

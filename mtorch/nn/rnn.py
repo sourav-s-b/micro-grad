@@ -1,11 +1,10 @@
-import numpy as np
-
+from mtorch.config import Device
 from mtorch.nn.base import Module
 from mtorch.tensor import Tensor
 
 
 def _sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
+    return 1.0 / (1.0 + Device.xp.exp(-Device.xp.clip(x, -500, 500)))
 
 
 class LSTM(Module):
@@ -15,31 +14,33 @@ class LSTM(Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
 
-        bound = 1.0 / np.sqrt(input_dim + hidden_dim)
+        bound = 1.0 / Device.xp.sqrt(input_dim + hidden_dim)
 
         self.W = Tensor(
-            np.random.uniform(-bound, bound, (input_dim + hidden_dim, 4 * hidden_dim)),
+            Device.xp.random.uniform(
+                -bound, bound, (input_dim + hidden_dim, 4 * hidden_dim)
+            ),
             requires_grad=True,
         )
-        self.B = Tensor(np.zeros((4 * hidden_dim)), requires_grad=True)
+        self.B = Tensor(Device.xp.zeros((4 * hidden_dim)), requires_grad=True)
 
     def __call__(self, x):
         assert isinstance(x, Tensor)
         b, t, _ = x.shape
         h_dim = self.hidden_dim
 
-        h_states = np.zeros((b, t, h_dim))
-        c_states = np.zeros((b, t, h_dim))
+        h_states = Device.xp.zeros((b, t, h_dim))
+        c_states = Device.xp.zeros((b, t, h_dim))
 
         cache = []
 
-        h_prev = np.zeros((b, h_dim))
-        c_prev = np.zeros((b, h_dim))
+        h_prev = Device.xp.zeros((b, h_dim))
+        c_prev = Device.xp.zeros((b, h_dim))
 
         for step in range(t):
             x_step = x.data[:, step, :]
 
-            z = np.hstack((x_step, h_prev))
+            z = Device.xp.hstack((x_step, h_prev))
 
             gates_pre = z @ self.W.data + self.B.data
 
@@ -51,11 +52,11 @@ class LSTM(Module):
             f = _sigmoid(f_pre)
             i = _sigmoid(i_pre)
 
-            c_tilde = np.tanh(c_pre)
+            c_tilde = Device.xp.tanh(c_pre)
             o = _sigmoid(o_pre)
 
             c_curr = f * c_prev + i * c_tilde
-            tanh_c = np.tanh(c_curr)
+            tanh_c = Device.xp.tanh(c_curr)
             h_curr = o * tanh_c
 
             cache.append((z, f, i, c_tilde, o, c_curr, tanh_c, h_prev, c_prev))
@@ -74,12 +75,12 @@ class LSTM(Module):
             if out.grad is None:
                 return
 
-            dW = np.zeros_like(self.W.data)
-            dB = np.zeros_like(self.B.data)
-            dx = np.zeros_like(x.data) if x.requires_grad else None
+            dW = Device.xp.zeros_like(self.W.data)
+            dB = Device.xp.zeros_like(self.B.data)
+            dx = Device.xp.zeros_like(x.data) if x.requires_grad else None
 
-            dh_next = np.zeros((b, h_dim))
-            dc_next = np.zeros((b, h_dim))
+            dh_next = Device.xp.zeros((b, h_dim))
+            dc_next = Device.xp.zeros((b, h_dim))
 
             for step in reversed(range(t)):
 
@@ -95,7 +96,7 @@ class LSTM(Module):
                 di_pre = dc * c_tilde * i * (1.0 - i)
                 dc_tilde_pre = dc * i * (1.0 - c_tilde**2)
 
-                da = np.hstack((df_pre, di_pre, dc_tilde_pre, do_pre))
+                da = Device.xp.hstack((df_pre, di_pre, dc_tilde_pre, do_pre))
 
                 if self.W.requires_grad:
                     dW += z.T @ da
@@ -139,13 +140,13 @@ class LSTM(Module):
         h_dim = self.hidden_dim
 
         if state is None:
-            h_prev = np.zeros((b, h_dim))
-            c_prev = np.zeros((b, h_dim))
+            h_prev = Device.xp.zeros((b, h_dim))
+            c_prev = Device.xp.zeros((b, h_dim))
 
         else:
             h_prev, c_prev = state
 
-        z = np.hstack((x_step, h_prev))
+        z = Device.xp.hstack((x_step, h_prev))
         gates_pre = z @ self.W.data + self.B.data
 
         f_pre = gates_pre[:, 0:h_dim]
@@ -156,11 +157,11 @@ class LSTM(Module):
         f = _sigmoid(f_pre)
         i = _sigmoid(i_pre)
 
-        c_tilde = np.tanh(c_pre)
+        c_tilde = Device.xp.tanh(c_pre)
         o = _sigmoid(o_pre)
 
         c_curr = f * c_prev + i * c_tilde
-        tanh_c = np.tanh(c_curr)
+        tanh_c = Device.xp.tanh(c_curr)
         h_curr = o * tanh_c
 
         return h_curr, (h_curr, c_curr)

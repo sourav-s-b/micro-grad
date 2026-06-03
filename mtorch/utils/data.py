@@ -1,6 +1,7 @@
 import numpy as np
 
 from mtorch.tensor import Tensor
+from mtorch.config import Device, to_cpu
 
 
 class Dataset:
@@ -37,8 +38,8 @@ class DataLoader:
         self.idx += self.batch_size
 
         samples = [self.dataset[s] for s in batch_idx]
-        batch_x = np.array([s[0] for s in samples])
-        batch_y = np.array([s[1] for s in samples])
+        batch_x = np.array([to_cpu(s[0]) for s in samples])
+        batch_y = np.array([to_cpu(s[1]) for s in samples])
 
         return Tensor(batch_x, requires_grad=False), Tensor(
             batch_y, requires_grad=False

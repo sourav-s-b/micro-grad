@@ -1,4 +1,4 @@
-import numpy as np
+from mtorch.config import Device
 from mtorch.nn.base import Module
 
 from mtorch.tensor import Tensor
@@ -20,14 +20,16 @@ class Conv2D(Module):
         self.padding = padding
 
         kh, kw = self.kernel_size
-        bound = 1.0 / np.sqrt(in_channels * kh * kw)
+        bound = 1.0 / Device.xp.sqrt(in_channels * kh * kw)
 
         self.W = Tensor(
-            np.random.uniform(-bound, bound, size=(out_channels, in_channels, kh, kw)),
+            Device.xp.random.uniform(
+                -bound, bound, size=(out_channels, in_channels, kh, kw)
+            ),
             requires_grad=True,
         )
 
-        self.B = Tensor(np.zeros((out_channels,)), requires_grad=True)
+        self.B = Tensor(Device.xp.zeros((out_channels,)), requires_grad=True)
 
     def __call__(self, x):
         b, c, h, w = x.shape
@@ -36,7 +38,7 @@ class Conv2D(Module):
 
         x_data = x.data
         if self.padding > 0:
-            x_data = np.pad(
+            x_data = Device.xp.pad(
                 x_data,
                 (
                     (0, 0),
@@ -49,7 +51,7 @@ class Conv2D(Module):
         out_h = (h + 2 * self.padding - kh) // self.stride + 1
         out_w = (w + 2 * self.padding - kw) // self.stride + 1
 
-        out_data = np.zeros((b, self.out_channels, out_h, out_w))
+        out_data = Device.xp.zeros((b, self.out_channels, out_h, out_w))
 
         for y in range(out_h):
             for xi in range(out_w):
@@ -65,7 +67,9 @@ class Conv2D(Module):
                     * self.W.data.reshape(1, self.out_channels, -1)
                 ).sum(axis=2)
 
-        out_data += self.B.data[np.newaxis, :, np.newaxis, np.newaxis]
+        out_data += self.B.data[
+            Device.xp.newaxis, :, Device.xp.newaxis, Device.xp.newaxis
+        ]
 
         out_tensor = Tensor(out_data, (x, self.W, self.B), "Conv2D")
 
@@ -75,7 +79,7 @@ class Conv2D(Module):
 
             x_data_pad = x.data
             if self.padding > 0:
-                x_data_pad = np.pad(
+                x_data_pad = Device.xp.pad(
                     x.data,
                     (
                         (0, 0),
@@ -85,8 +89,8 @@ class Conv2D(Module):
                     ),
                 )
 
-            dx_pad = np.zeros_like(x_data_pad) if x.requires_grad else None
-            dw = np.zeros_like(self.W.data) if self.W.requires_grad else None
+            dx_pad = Device.xp.zeros_like(x_data_pad) if x.requires_grad else None
+            dw = Device.xp.zeros_like(self.W.data) if self.W.requires_grad else None
 
             for y in range(out_h):
                 for xi in range(out_w):
@@ -100,11 +104,11 @@ class Conv2D(Module):
 
                     if self.W.requires_grad:
 
-                        dw += np.einsum("bo,bchw->ochw", g, patch)
+                        dw += Device.xp.einsum("bo,bchw->ochw", g, patch)
 
                     if x.requires_grad:
 
-                        dx = np.einsum("bo,ochw->bchw", g, self.W.data)
+                        dx = Device.xp.einsum("bo,ochw->bchw", g, self.W.data)
                         dx_pad[
                             :,
                             :,
@@ -148,7 +152,7 @@ class MaxPool2D(Module):
         out_h = (h - kh) // self.stride + 1
         out_w = (w - kw) // self.stride + 1
 
-        out_data = np.zeros((b, c, out_h, out_w))
+        out_data = Device.xp.zeros((b, c, out_h, out_w))
 
         for y in range(out_h):
             for x_idx in range(out_w):
@@ -156,7 +160,7 @@ class MaxPool2D(Module):
                 xs = x_idx * self.stride
 
                 patch = x.data[:, :, ys : ys + kh, xs : xs + kw]
-                out_data[:, :, y, x_idx] = np.max(patch, axis=(2, 3))
+                out_data[:, :, y, x_idx] = Device.xp.max(patch, axis=(2, 3))
 
         out = Tensor(out_data, (x,), "MaxPool2D", requires_grad=x.requires_grad)
 
@@ -167,7 +171,7 @@ class MaxPool2D(Module):
                 return
 
             if x.grad is None:
-                x.grad = np.zeros_like(x.data)
+                x.grad = Device.xp.zeros_like(x.data)
             for y in range(out_h):
                 for x_idx in range(out_w):
                     ys = y * self.stride
@@ -177,7 +181,9 @@ class MaxPool2D(Module):
                     max_val = out.data[:, :, y, x_idx].reshape(b, c, 1, 1)
                     mask = patch == max_val
 
-                    mask = mask / (np.sum(mask, axis=(2, 3), keepdims=True) + 1e-8)
+                    mask = mask / (
+                        Device.xp.sum(mask, axis=(2, 3), keepdims=True) + 1e-8
+                    )
 
                     g_slice = out.grad[:, :, y, x_idx].reshape(b, c, 1, 1)
                     x.grad[:, :, ys : ys + kh, xs : xs + kw] += mask * g_slice

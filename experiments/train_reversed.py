@@ -1,9 +1,9 @@
 import numpy as np
 
-from mtorch.nn.functional import cross_entropy_loss
-from mtorch.nn.modules import LSTM, Embedding, Linear, Module
-from mtorch.optim.optimizer import Adam
-from mtorch.tensor import Tensor
+from mtorch import cross_entropy_loss
+from mtorch import LSTM, Embedding, Linear, Module
+from mtorch import Adam
+from mtorch import Tensor
 
 chars = list("abcdefghijklmnopqrstuvwxyz")
 vocab = {c: i for i, c in enumerate(chars)}

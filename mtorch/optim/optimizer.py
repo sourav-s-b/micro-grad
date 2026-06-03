@@ -1,4 +1,4 @@
-import numpy as np
+from mtorch.config import Device
 
 
 class Optimizer:
@@ -24,8 +24,8 @@ class Adam(Optimizer):
         self.eps = eps
         self.t = 0
 
-        self.m = [np.zeros_like(p.data) for p in self.params]
-        self.v = [np.zeros_like(p.data) for p in self.params]
+        self.m = [Device.xp.zeros_like(p.data) for p in self.params]
+        self.v = [Device.xp.zeros_like(p.data) for p in self.params]
 
     def step(self):
         self.t += 1
@@ -38,7 +38,7 @@ class Adam(Optimizer):
             m_hat = self.m[i] / (1 - self.beta1**self.t)
             v_hat = self.v[i] / (1 - self.beta2**self.t)
 
-            p.data -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+            p.data -= self.lr * m_hat / (Device.xp.sqrt(v_hat) + self.eps)
 
 
 class SGD(Optimizer):
@@ -47,7 +47,7 @@ class SGD(Optimizer):
         super().__init__(params)
         self.lr = lr
         self.momentum = momentum
-        self.velocities = [np.zeros_like(p.data) for p in self.params]
+        self.velocities = [Device.xp.zeros_like(p.data) for p in self.params]
 
     def step(self):
 
