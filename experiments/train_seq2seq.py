@@ -125,11 +125,11 @@ HIDDEN_DIM = 64
 model = Seq2Seq(VOCAB_SIZE, HIDDEN_DIM)
 optimizer = Adam(model.parameters(), lr=0.01)
 
-X_train, Y_in_train, Y_target_train = generate_dataset(2000, seq_len=5)
+X_train, Y_in_train, Y_target_train = generate_dataset(10000, seq_len=5)
 print("TRAINING ")
 
 batch_size = 32
-epoch_range = 20
+epoch_range = 50
 model.train()
 for epoch in range(epoch_range):
     epoch_loss = 0

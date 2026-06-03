@@ -1,4 +1,4 @@
-from mtorch.nn.modules import (
+from mtorch.nn import (
     Sequential,
     Linear,
     Module,
