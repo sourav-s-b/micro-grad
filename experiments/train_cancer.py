@@ -2,9 +2,9 @@ from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from mtorch import Sequential, Linear, Dropout, ReLU, Adam
+from mtorch.nn import Sequential, Linear, Dropout, ReLU
 from mtorch.utils.data import DataLoader, Dataset
-from mtorch import softmax_cross_entropy
+from mtorch import softmax_cross_entropy, Adam
 from mtorch import Tensor
 import numpy as np
 

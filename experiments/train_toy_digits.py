@@ -1,9 +1,9 @@
-from mtorch import Dropout, Linear, ReLU, Sequential, Adam
+from mtorch.nn import Dropout, Linear, ReLU, Sequential
 from sklearn.datasets import load_digits
 from sklearn.model_selection import train_test_split
 
 from mtorch.utils.data import DataLoader, Dataset
-from mtorch import softmax_cross_entropy
+from mtorch import softmax_cross_entropy, Adam
 from mtorch import Tensor
 from mtorch.config import set_device, to_cpu
 import numpy as np

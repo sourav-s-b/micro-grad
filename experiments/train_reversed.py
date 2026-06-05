@@ -1,7 +1,7 @@
 import numpy as np
 
 from mtorch import cross_entropy_loss
-from mtorch import LSTM, Embedding, Linear, Module
+from mtorch.nn import LSTM, Embedding, Linear, Module
 from mtorch import Adam
 from mtorch import Tensor
 from mtorch.config import set_device, to_cpu

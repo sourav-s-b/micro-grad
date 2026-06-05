@@ -27,7 +27,7 @@ class Tensor:
         out = Tensor(
             self.xp.swapaxes(self.data, -1, -2).copy(),
             (self,),
-            _op="transpose",
+            _op="T",
             requires_grad=self.requires_grad,
         )
 
@@ -41,6 +41,33 @@ class Tensor:
             out._backward = _backward
 
         return out
+
+    def transpose(self, *axes):
+
+        if len(axes) == 1 and isinstance(axes[0], (tuple, list)):
+            axes = axes[0]
+
+        out_data = self.xp.transpose(self.data, axes)
+        out = Tensor(out_data, (self,), _op='transpose', requires_grad=self.requires_grad)
+        
+        if self.requires_grad:
+
+            
+            import numpy as np
+            inv_axes = np.argsort(axes).tolist()
+
+            def _backward():
+                if out.grad is None:
+                    return
+                
+                self._accumulate_grad(self.xp.transpose(out.grad, inv_axes))
+
+            out._backward = _backward
+
+        return out
+
+
+
 
     def __pow__(self, power):
         assert isinstance(power, (int, float))
