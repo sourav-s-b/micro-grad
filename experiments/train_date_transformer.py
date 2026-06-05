@@ -7,8 +7,7 @@ from mtorch import Tensor, Adam
 from mtorch.nn import (
     Seq2SeqTransformer,
 )
-from mtorch.nn.functional import cross_entropy_loss
-from mtorch.optim import optimizer
+from mtorch import cross_entropy_loss
 
 set_device("cuda")
 

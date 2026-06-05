@@ -4,7 +4,6 @@ from datasets import load_dataset
 
 from mtorch.nn import Sequential, Conv2D, MaxPool2D, Linear, ReLU
 from mtorch import softmax_cross_entropy, Adam
-from mtorch.optim import optimizer
 from mtorch.utils.data import DataLoader, Dataset
 
 from mtorch.config import set_device, to_cpu

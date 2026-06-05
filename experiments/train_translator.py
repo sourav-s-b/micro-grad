@@ -5,7 +5,7 @@ from mtorch.config import set_device, to_cpu
 
 from mtorch import Tensor, Adam
 from mtorch.nn import Module, LSTM, Embedding, Linear, DotProductAttention
-from mtorch.nn.functional import cross_entropy_loss
+from mtorch import cross_entropy_loss
 from mtorch.optim import optimizer
 
 set_device("cuda")
