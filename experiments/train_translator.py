@@ -5,8 +5,9 @@ from mtorch.config import set_device, to_cpu
 
 from mtorch import Tensor, Adam
 from mtorch.nn import Module, LSTM, Embedding, Linear, DotProductAttention
-from mtorch import cross_entropy_loss
+from mtorch import cross_entropy_loss, EarlyStopping
 from mtorch.optim import optimizer
+from mtorch.utils.saves import load_model
 
 set_device("cuda")
 
@@ -174,6 +175,7 @@ class TranslatorModel(Module):
 HIDDEN_DIM = 128
 model = TranslatorModel(VOCAB_SIZE, HIDDEN_DIM)
 optimizer = Adam(model.parameters(), lr=0.005)
+early_stopper = EarlyStopping(filepath="translator_model_1.pkl")
 
 X_train, Y_in_train, Y_target_train = generate_dataset(10000)
 print("-------- Training -------------")
@@ -209,9 +211,15 @@ for epoch in range(epoch_range):
         epoch_loss += to_cpu(loss.data).item()
         batches += 1
 
-    print(f"Epoch {epoch+1}/{epoch_range} | Avg Loss: {epoch_loss/batches: .4f}")
+    avg_loss = epoch_loss / batches
+    print(f"Epoch {epoch+1}/{epoch_range} | Avg Loss: {avg_loss: .4f}")
+
+    if early_stopper(avg_loss, model):
+        print(f"Early stopping triggerred \n\n")
+        break
 
 print("---------INFERENCE--------")
+load_model(model, filepath="translator_model_1.pkl")
 print('type a date in format like "Jan 15, 2024"')
 
 while True:

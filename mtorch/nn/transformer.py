@@ -21,13 +21,14 @@ class PositionalEncoding(Module):
         pe[:, 1::2] = np.cos(position * div_term)
 
         self.pe = pe[np.newaxis, ...]
+        self.pe_gpu = Device.xp.array(self.pe)
 
     def __call__(self, x):
 
         seq_len = x.shape[1]  # shape = batch, seq_len, d_model
 
         pe_tensor = Tensor(
-            Device.xp.array(self.pe[:, :seq_len, :]), requires_grad=False
+            Device.xp.array(self.pe_gpu[:, :seq_len, :]), requires_grad=False
         )
 
         return x + pe_tensor

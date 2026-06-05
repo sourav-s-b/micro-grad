@@ -1,6 +1,7 @@
 from mtorch.config import Device
 
 from mtorch.tensor import Tensor
+from mtorch.utils.saves import save_model
 
 
 def softmax_cross_entropy(logits, targets):
@@ -53,18 +54,23 @@ def cross_entropy_loss(logits, targets):
 
 class EarlyStopping:
 
-    def __init__(self, patience=3, min_delta=1e-4) -> None:
+    def __init__(self, patience=3, min_delta=1e-4, filepath="best_model.pkl") -> None:
         self.patience = patience
         self.min_delta = min_delta
+        self.filepath = filepath
+
         self.counter = 0
         self.best_loss = float("inf")
         self.early_stop = False
 
-    def __call__(self, current_loss):
+    def __call__(self, current_loss, model):
 
         if current_loss < self.best_loss - self.min_delta:
             self.best_loss = current_loss
             self.counter = 0
+
+            save_model(model, self.filepath, log=False)
+            print(f"[Checkpoint] Saving best weights to: {self.filepath}")
         else:
             self.counter += 1
             if self.counter >= self.patience:

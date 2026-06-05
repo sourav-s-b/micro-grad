@@ -3,7 +3,7 @@ import numpy as np
 from datasets import load_dataset
 
 from mtorch.nn import Sequential, Conv2D, MaxPool2D, Linear, ReLU
-from mtorch import softmax_cross_entropy, Adam
+from mtorch import softmax_cross_entropy, Adam, EarlyStopping
 from mtorch.utils.data import DataLoader, Dataset
 
 from mtorch.config import set_device, to_cpu
@@ -70,6 +70,7 @@ model = CNN()
 optimizer = Adam(model.parameters(), lr=0.005)
 
 test_loader = DataLoader(test_dataset, shuffle=False)
+early_stopper = EarlyStopping(filepath="mnist_classifier.pkl")
 Y_test_labels = test_dataset.y
 
 for epoch in range(15):
@@ -104,6 +105,11 @@ for epoch in range(15):
 
     accuracy = (correct_preds / total_samples) * 100
 
+    avg_loss = epoch_loss / batches
     print(
-        f"Epoch {epoch+1:02d} / 15 | Train Loss: {epoch_loss/batches:.4f} | Val Accuracy: {accuracy:.2f}%"
+        f"Epoch {epoch+1:02d} / 15 | Train Loss: {avg_loss:.4f} | Val Accuracy: {accuracy:.2f}%"
     )
+
+    if early_stopper(avg_loss, model):
+        print(f"Early stopping triggered \n\n")
+        break

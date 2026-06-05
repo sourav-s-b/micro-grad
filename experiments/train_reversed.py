@@ -2,9 +2,10 @@ import numpy as np
 
 from mtorch import cross_entropy_loss
 from mtorch.nn import LSTM, Embedding, Linear, Module
-from mtorch import Adam
+from mtorch import Adam, EarlyStopping
 from mtorch import Tensor
 from mtorch.config import set_device, to_cpu
+from mtorch.utils.saves import load_model
 
 set_device("cpu")
 
@@ -127,6 +128,7 @@ HIDDEN_DIM = 64
 
 model = Seq2Seq(VOCAB_SIZE, HIDDEN_DIM)
 optimizer = Adam(model.parameters(), lr=0.01)
+early_stopper = EarlyStopping(filepath="reversed_model_1.pkl")
 
 X_train, Y_in_train, Y_target_train = generate_dataset(10000, seq_len=5)
 print("TRAINING ")
@@ -162,10 +164,18 @@ for epoch in range(epoch_range):
         epoch_loss += to_cpu(loss.data).item()
         batches += 1
 
-    print(f"Epoch {epoch+1}/{epoch_range} | Avg Loss: {epoch_loss/batches: .4f}")
+    avg_loss = epoch_loss / batches
+
+    print(f"Epoch {epoch+1}/{epoch_range} | Avg Loss: {avg_loss: .4f}")
+
+    if early_stopper(avg_loss, model):
+        print(f"Early stopping triggerred \n\n")
+        break
+
+
 print("Training Complete")
 
-
+load_model("reversed_model_1.pkl")
 print("INFERENCE -----------(type 5-letter word or quit to exit)")
 while True:
 

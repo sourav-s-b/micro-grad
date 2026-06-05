@@ -2,14 +2,14 @@ import pickle
 from mtorch.config import to_cpu, Device
 
 
-def save_model(model, filepath="model_weights.pkl"):
+def save_model(model, filepath="model_weights.pkl", log=True):
 
-    weights_to_save = [to_cpu(p.data) for p in mode.parameters()]
+    weights_to_save = [to_cpu(p.data) for p in model.parameters()]
 
     with open(filepath, "wb") as f:
         pickle.dump(weights_to_save, f)
-
-    print(f"Successfully saved weights to '{filepath}'")
+    if log:
+        print(f"Successfully saved weights to '{filepath}'")
 
 
 def load_model(model, filepath=None):
@@ -28,3 +28,5 @@ def load_model(model, filepath=None):
         parameters.data = Device.xp.array(saved_array)
 
     print(f"Successfully loaded weights from '{filepath}'")
+
+    return model

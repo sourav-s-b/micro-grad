@@ -4,14 +4,14 @@ from sklearn.preprocessing import StandardScaler
 
 from mtorch.nn import Sequential, Linear, Dropout, ReLU
 from mtorch.utils.data import DataLoader, Dataset
-from mtorch import softmax_cross_entropy, Adam
+from mtorch import softmax_cross_entropy, Adam, EarlyStopping
 from mtorch import Tensor
 import numpy as np
 
 
 from mtorch.config import set_device, Device, to_cpu
 
-set_device("cuda")
+# set_device("cuda")
 
 
 class CancerDataset(Dataset):
@@ -54,7 +54,9 @@ model = Sequential(
 )
 
 optimizer = Adam(model.parameters(), lr=0.005)
-
+early_stopper = EarlyStopping(
+    patience=4, min_delta=0.0001, filepath="cancer_model_1.pkl"
+)
 epoch_range = 20
 
 for epoch in range(epoch_range):
@@ -82,7 +84,11 @@ for epoch in range(epoch_range):
     _, test_probs = softmax_cross_entropy(test_logits, Y_test_tensor)
     preds = to_cpu(Device.xp.argmax(test_probs, axis=-1))
     accuracy = np.mean(preds == y_test) * 100
-
+    avg_loss = epoch_loss / batches
     print(
-        f"Epoch {epoch+1} / {epoch_range} | Average Loss: {epoch_loss/batches:4f} | Validation Accuracy: {accuracy: .3f}"
+        f"Epoch {epoch+1} / {epoch_range} | Average Loss: {avg_loss:4f} | Validation Accuracy: {accuracy: .3f}"
     )
+
+    if early_stopper(avg_loss, model):
+        print("\nEarly stopping triggered!! ----------")
+        break

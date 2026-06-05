@@ -3,12 +3,14 @@ from sklearn.datasets import load_digits
 from sklearn.model_selection import train_test_split
 
 from mtorch.utils.data import DataLoader, Dataset
-from mtorch import softmax_cross_entropy, Adam
+from mtorch import softmax_cross_entropy, Adam, EarlyStopping
 from mtorch import Tensor
 from mtorch.config import set_device, to_cpu
 import numpy as np
 
-set_device("cuda")  # cpu is better for this
+from mtorch.utils.saves import load_model
+
+set_device("cpu")  # cpu is better for this
 
 
 class DigitDataset(Dataset):
@@ -47,7 +49,9 @@ Y_tensor = Tensor(Y_test_onehot, requires_grad=False)
 model = Sequential(Linear(64, 10), ReLU(), Dropout(0.1), Linear(10, 10))
 
 optimizer = Adam(model.parameters(), lr=0.005)
-
+early_stopper = EarlyStopping(
+    patience=3, min_delta=0.0001, filepath="toy_digits_classifier_1.pkl"
+)
 epoch_range = 20
 
 
@@ -74,16 +78,21 @@ for epoch in range(epoch_range):
     _, predicted_probs = softmax_cross_entropy(test_logits, Y_tensor)
     preds = np.argmax(to_cpu(predicted_probs), axis=-1)
     accuracy = np.mean(preds == y_test) * 100
+    avg_loss = epoch_loss / batches
     print(
-        f"Epoch {epoch+1} / {epoch_range} | Average Loss: {epoch_loss/batches : 4f} | Validation Accuracy: {accuracy : .3f}"
+        f"Epoch {epoch+1} / {epoch_range} | Average Loss: { avg_loss : 4f} | Validation Accuracy: {accuracy : .3f}"
     )
+
+    if early_stopper(avg_loss, model):
+        print(f"Early stopping triggerred \n\n")
+        break
 
 
 random_idx = np.random.choice(len(test_data), size=5, replace=False)
 x_test = Tensor(np.array([test_data[i][0] for i in random_idx]), requires_grad=False)
 y_one_shots = np.array([test_data[i][1] for i in random_idx])
 y_test = Tensor(y_one_shots, requires_grad=False)
-
+load_model(model, "toy_digits_classifier_1.pkl")
 logits = model(x_test)
 
 _, preds = softmax_cross_entropy(logits, y_test)
