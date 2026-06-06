@@ -11,4 +11,5 @@ from mtorch.nn.transformer import (
     TransformerEncoderBlock,
     TransformerDecoderBlock,
     Seq2SeqTransformer,
+    CausalTransformer,
 )

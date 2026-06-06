@@ -4,4 +4,5 @@ from mtorch.optim.functional import (
     softmax_cross_entropy,
     cross_entropy_loss,
     EarlyStopping,
+    clip_gradients,
 )

@@ -15,7 +15,7 @@ def softmax_cross_entropy(logits, targets):
     loss_data = -Device.xp.sum(targets.data * Device.xp.log(probs + 1e-15)) / batch_size
 
     out = Tensor(
-        loss_data, (logits, targets), "softmax_cross_entropy", requires_grad=True
+        loss_data, (logits, targets), "SoftmaxCrossEntropy", requires_grad=True
     )
 
     def _backward():
@@ -29,26 +29,46 @@ def softmax_cross_entropy(logits, targets):
 def cross_entropy_loss(logits, targets):
 
     b = logits.shape[0]
+    xp = Device.xp
+    logits_data = logits.data
+    target_data = (
+        targets.data.astype(xp.int32)
+        if hasattr(targets, "data")
+        else targets.astype(xp.int32)
+    )
 
-    logits_max = Device.xp.max(logits.data, axis=-1, keepdims=True)
-    exp_logits = Device.xp.exp(logits.data - logits_max)
-    probs = exp_logits / Device.xp.sum(exp_logits, axis=-1, keepdims=True)
+    logits_max = xp.max(logits_data, axis=-1, keepdims=True)
+    shifted_logits = logits_data - logits_max
 
-    target_data = targets.data.astype(int)
-    correct_probs = probs[Device.xp.arange(b), target_data]
+    exp_logits = xp.exp(shifted_logits)
+    sum_exp = xp.sum(exp_logits, axis=-1, keepdims=True)
 
-    loss_data = -Device.xp.sum(Device.xp.log(correct_probs + 1e-15)) / b
+    log_probs = shifted_logits - xp.log(sum_exp)
 
-    out = Tensor(loss_data, (logits, targets), "cross_entropy")
+    correct_probs = log_probs[xp.arange(b), target_data]
 
-    def _backward():
-        if logits.requires_grad:
-            dlogits = probs.copy()
-            dlogits[Device.xp.arange(b), target_data] -= 1.0
-            dlogits = dlogits / b
-            logits._accumulate_grad(dlogits)
+    loss_data = -xp.mean(correct_probs)
 
-    out._backward = _backward
+    out = Tensor(
+        loss_data, (logits,), "CrossEntropy", requires_grad=logits.requires_grad
+    )
+
+    if logits.requires_grad:
+
+        def _backward():
+            if out.grad is None:
+                return
+            probs = exp_logits / sum_exp
+
+            dx = probs.copy()
+            dx[xp.arange(b), target_data] -= 1.0
+
+            # Scale by the sequence length (N) and multiply by the incoming gradient
+            dx = dx * (out.grad / b)
+
+            logits._accumulate_grad(dx)
+
+        out._backward = _backward
     return out
 
 
@@ -77,3 +97,23 @@ class EarlyStopping:
                 self.early_stop = True
 
         return self.early_stop
+
+
+def clip_gradients(parameters, max_norm=1.0):
+    """Scales down gradients if they explode past max_norm."""
+    xp = Device.xp
+    total_norm = 0.0
+
+    # Calculate the total magnitude of all gradients
+    for p in parameters:
+        if p.grad is not None:
+            total_norm += xp.sum(p.grad**2)
+
+    total_norm = xp.sqrt(total_norm)
+
+    # If it's too big, scale everything down proportionally
+    clip_coef = max_norm / (total_norm + 1e-6)
+    if clip_coef < 1.0:
+        for p in parameters:
+            if p.grad is not None:
+                p.grad *= clip_coef

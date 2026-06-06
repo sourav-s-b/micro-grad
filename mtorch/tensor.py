@@ -1,13 +1,17 @@
 from mtorch.config import Device
 
+import numpy as np
 
 class Tensor:
 
-    __array_priority = 1000
+    __array_priority__ = 1000
 
     def __init__(self, data, _children=(), _op="", requires_grad=True):
         self.xp = Device.xp
-        self.data = self.xp.array(data, dtype=self.xp.float32)
+        if isinstance(data, self.xp.ndarray) and data.dtype == self.xp.float32:
+            self.data = data
+        else:
+            self.data = self.xp.array(data, dtype=self.xp.float32)
         self.grad = None
         self._prev = tuple(_children)
         self._op = _op
@@ -15,7 +19,9 @@ class Tensor:
         self.requires_grad = requires_grad
 
     def zero_grad(self):
-        if self.requires_grad:
+        if self.grad is not None:
+            self.grad.fill(0)
+        else:
             self.grad = self.xp.zeros_like(self.data)
 
     @property
@@ -53,7 +59,6 @@ class Tensor:
         if self.requires_grad:
 
             
-            import numpy as np
             inv_axes = np.argsort(axes).tolist()
 
             def _backward():
@@ -424,28 +429,44 @@ class Tensor:
 
 
 
-    def backward(self):
+    def backward(self, cached_topo = None):
         if not self.requires_grad:
             return
         if self.data.size != 1:
             raise RuntimeError("Grad can only be implicitly created for scalar outputs")
 
+        if cached_topo is not None:
+            self.grad = self.xp.ones_like(self.data)
+            for node in reversed(cached_topo):
+                node._backward()
+            return cached_topo
+
         topo = []
         visited = set()
+        stack = [self]
 
-        def _build_topo(v):
-            if v not in visited:
-                visited.add(v)
-                for child in v._prev:
-                    _build_topo(child)
-                topo.append(v)
-
-        _build_topo(self)
+        while stack:
+            node = stack[-1]
+            if node not in visited:
+                visited.add(node)
+                univisited_children = [c for c in node._prev if c not in visited]
+                if univisited_children:
+                    stack.extend(univisited_children)
+                else:
+                    topo.append(node)
+                    stack.pop()
+            else:
+                if node not in topo:
+                    topo.append(node)
+                stack.pop()
 
         self.grad = self.xp.ones_like(self.data)
 
         for node in reversed(topo):
             node._backward()
+            node._backward = lambda: None
+
+        return topo
 
     def _accumulate_grad(self, grad):
         if not self.requires_grad:
