@@ -1,3 +1,4 @@
+import math
 from mtorch.config import Device
 
 
@@ -93,3 +94,35 @@ class SGD(Optimizer):
             v += self.lr * p.grad
 
             p.data -= v
+
+
+class CosineWarmupScheduler:
+
+    def __init__(self, optimizer, warmup_steps, total_steps, max_lr=3e-4, min_lr=3e-5):
+
+        self.optimizer = optimizer
+        self.warmup_steps = warmup_steps
+        self.total_steps = total_steps
+        self.max_lr = max_lr
+        self.min_lr = min_lr
+        self.current_step = 0
+
+    def step(self):
+
+        self.current_step += 1
+
+        # warmup
+        if self.current_step <= self.warmup_steps:
+            lr = self.max_lr * (self.current_step / self.warmup_steps)
+        elif self.current_step <= self.total_steps:  # cosine decay
+            decay_ratio = (self.current_step - self.warmup_steps) / (
+                self.total_steps - self.warmup_steps
+            )
+            coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+            lr = self.min_lr + coeff * (self.max_lr - self.min_lr)
+        else:  # flatline at min
+            lr = self.min_lr
+
+        self.optimizer.lr = lr
+
+        return lr

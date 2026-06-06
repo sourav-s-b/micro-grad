@@ -386,6 +386,24 @@ class Tensor:
 
         return out
 
+    def silu(self):
+        xp = Device.xp
+
+        sigmoid = 1.0 / (1.0 + xp.exp(-self.data))
+        out_data = self.data * sigmoid
+
+        out = Tensor(out_data, (self, ) , 'SiLU', requires_grad=self.requires_grad)
+
+        if self.requires_grad:
+            def _backward():
+                if out.grad is None: return
+
+                dx = sigmoid + out_data * (1.0 - sigmoid)
+                self._accumulate_grad(out.grad * dx)
+
+            out._backward = _backward
+        return out
+
     def softmax(self, axis=-1):
 
         max_val = self.xp.max(self.data, axis = axis, keepdims=True)

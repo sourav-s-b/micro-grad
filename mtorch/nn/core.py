@@ -106,3 +106,51 @@ class LayerNorm(Module):
 
     def parameters(self):
         return [self.gamma, self.beta]
+
+
+class RMSNorm(Module):
+
+    def __init__(self, dim, eps=1e-6):
+        super().__init__()
+
+        self.eps = eps
+        self.weight = Tensor(Device.xp.ones(dim))
+
+    def __call__(self, x):
+        xp = Device.xp
+
+        x_data = x.data
+        w_data = self.weight.data
+
+        rms = xp.sqrt(xp.mean(x_data**2, axis=-1, keepdims=True) + self.eps)
+        normed_x = x_data / rms
+        out_data = normed_x * w_data
+
+        out = Tensor(
+            out_data, (x, self.weight), "RMSNorm", requires_grad=x.requires_grad
+        )
+
+        if x.requires_grad:
+
+            def _backward():
+
+                if out.grad is None:
+                    return
+
+                dW = xp.sum(out.grad * normed_x, axis=tuple(range(x_data.ndim - 1)))
+                self.weight._accumulate_grad(dW)
+
+                dx_normed = out.grad * w_data
+                d_rms = xp.sum(
+                    dx_normed * x_data * (-1.0 / (rms**2)), axis=-1, keepdims=True
+                )
+                dX = (dx_normed / rms) + (d_rms * x_data / x_data.shape[-1])
+
+                x._accumulate_grad(dX)
+
+            out._backward = _backward
+
+        return out
+
+    def parameters(self):
+        return [self.weight]
