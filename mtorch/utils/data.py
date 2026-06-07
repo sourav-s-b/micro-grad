@@ -1,6 +1,7 @@
 import numpy as np
 import queue
 import threading
+import math
 
 from mtorch.tensor import Tensor
 from mtorch.config import Device, to_cpu
@@ -46,6 +47,9 @@ class DataLoader:
         return Tensor(batch_x, requires_grad=False), Tensor(
             batch_y, requires_grad=False
         )
+
+    def __len__(self):
+        return math.ceil(len(self.dataset) / self.batch_size)
 
 
 class PrefetchedDataLoader:
