@@ -1,7 +1,8 @@
 import numpy as np
-
+import math
 
 from mtorch.nn import CausalTransformer
+from mtorch.optim.optimizer import CosineWarmupScheduler
 from mtorch.utils.data import Dataset, DataLoader
 from mtorch.config import set_device, to_cpu, Device
 from mtorch import Adam, cross_entropy_loss, EarlyStopping, clip_gradients, Tensor
@@ -29,7 +30,7 @@ class TextDataset(Dataset):
 set_device("cuda")
 
 DATA_FILE = "dialogs.txt"
-SEQ_LEN = 32
+SEQ_LEN = 256
 BATCH_SIZE = 64
 
 with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -52,20 +53,24 @@ val_loader = DataLoader(
     TextDataset(val_data, seq_len=SEQ_LEN), batch_size=BATCH_SIZE, shuffle=True
 )
 
-epochs = 5000
+epochs = 15
+total_batches = math.ceil(len(train_loader.dataset) / train_loader.batch_size)
+total_training_steps = total_batches * epochs
+warmup_steps = int(0.05 * total_training_steps)
 
 model = CausalTransformer(vocab_size=VOCAB_SIZE, d_model=64, num_heads=4, num_layers=2)
 optimizer = Adam(model.parameters(), lr=3e-4)
 early_stopper = EarlyStopping(patience=3, min_delta=0.01, filepath="best_chatbot.pkl")
 
 
+scheduler = CosineWarmupScheduler(
+    optimizer, warmup_steps, total_training_steps, max_lr=4e-4, min_lr=4e-5
+)
+
+
 def train_model():
     print("-------Training--------")
     model.train()
-
-    import math
-
-    total_batches = math.ceil(len(train_loader.dataset) / train_loader.batch_size)
 
     for step in range(epochs):
 
@@ -82,14 +87,16 @@ def train_model():
             loss.backward()
             clip_gradients(model.parameters(), max_norm=1.0)
             optimizer.step()
+            current_lr = scheduler.step()
 
             total_loss += to_cpu(loss.data).item()
 
             # print every 10 batches
             if (batch_idx + 1) % 10 == 0:
                 avg = total_loss / (batch_idx + 1)
+                display_lr = current_lr if "current_lr" in locals() else 0.0
                 print(
-                    f"\r\tEpoch {step} | Batch {batch_idx+1} /{total_batches}| Loss: {avg:.4f}",
+                    f"\r\tEpoch {step} | Micro-Batch {batch_idx+1}/{total_batches} | Loss: {avg:.4f} | LR: {display_lr:.6f}",
                     end="",
                     flush=True,
                 )
@@ -116,6 +123,9 @@ def train_model():
                 "Validation loss flatlined. Early stopping triggered to prevent overfitting!"
             )
             break
+
+
+train_model()
 
 
 def chat_with_bot(

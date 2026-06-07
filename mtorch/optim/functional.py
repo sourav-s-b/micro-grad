@@ -3,6 +3,8 @@ from mtorch.config import Device
 from mtorch.tensor import Tensor
 from mtorch.utils.saves import save_model
 
+_fused_ce_backward_kernel = None
+
 
 def softmax_cross_entropy(logits, targets):
 
@@ -28,29 +30,23 @@ def softmax_cross_entropy(logits, targets):
 
 def cross_entropy_loss(logits, targets):
 
-    b = logits.shape[0]
     xp = Device.xp
-    logits_data = logits.data
-    target_data = (
-        targets.data.astype(xp.int32)
-        if hasattr(targets, "data")
-        else targets.astype(xp.int32)
-    )
+    B = logits.shape[0]
+    V = logits.shape[1]
 
-    logits_max = xp.max(logits_data, axis=-1, keepdims=True)
-    shifted_logits = logits_data - logits_max
+    probs = xp.array(logits.data, copy=True)
+    logits_max = xp.max(probs, axis=-1, keepdims=True)
+    probs -= logits_max
+    xp.exp(probs, out=probs)
+    sum_exp = xp.sum(probs, axis=-1, keepdims=True)
+    probs /= sum_exp
 
-    exp_logits = xp.exp(shifted_logits)
-    sum_exp = xp.sum(exp_logits, axis=-1, keepdims=True)
-
-    log_probs = shifted_logits - xp.log(sum_exp)
-
-    correct_probs = log_probs[xp.arange(b), target_data]
-
-    loss_data = -xp.mean(correct_probs)
+    batch_indices = xp.arange(B)
+    correct_probs = probs[batch_indices, targets.data.astype(xp.int32)]
+    loss_val = -xp.sum(xp.log(correct_probs + 1e-8)) / B
 
     out = Tensor(
-        loss_data, (logits,), "CrossEntropy", requires_grad=logits.requires_grad
+        loss_val, (logits,), "CrossEntropy", requires_grad=logits.requires_grad
     )
 
     if logits.requires_grad:
@@ -58,15 +54,29 @@ def cross_entropy_loss(logits, targets):
         def _backward():
             if out.grad is None:
                 return
-            probs = exp_logits / sum_exp
+            is_cupy = hasattr(xp, "ElementwiseKernel")
 
-            dx = probs.copy()
-            dx[xp.arange(b), target_data] -= 1.0
+            if is_cupy:
 
-            # Scale by the sequence length (N) and multiply by the incoming gradient
-            dx = dx * (out.grad / b)
+                d_logits = xp.empty_like(probs)
+                kernel = _get_fused_ce_kernel(xp)
 
-            logits._accumulate_grad(dx)
+                kernel(
+                    probs,
+                    targets.data.astype(xp.int32),
+                    out.grad,
+                    B,
+                    V,
+                    d_logits,
+                )
+            else:
+
+                d_logits = probs
+
+                d_logits[batch_indices, targets] -= 1.0
+                d_logits *= out.grad / B
+
+            logits._accumulate_grad(d_logits)
 
         out._backward = _backward
     return out
@@ -97,6 +107,30 @@ class EarlyStopping:
                 self.early_stop = True
 
         return self.early_stop
+
+
+def _get_fused_ce_kernel(xp):
+    global _fused_ce_backward_kernel
+    if _fused_ce_backward_kernel is None:
+        _fused_ce_backward_kernel = xp.ElementwiseKernel(
+            in_params="T probs, raw int32 targets, T grad_val, int32 batch_size, int32 vocab_size",
+            out_params="T d_logits",
+            operation="""
+                int row = i / vocab_size;
+                int col = i % vocab_size;
+                
+                T p = probs;
+
+                if (col == targets[row]){
+                    p -= 1.0;
+                }
+
+                d_logits = p * (grad_val / (T)batch_size);
+            """,
+            name="fused_cross_entropy_bwd",
+        )
+
+    return _fused_ce_backward_kernel
 
 
 def clip_gradients(parameters, max_norm=1.0):
