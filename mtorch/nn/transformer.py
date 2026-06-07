@@ -2,7 +2,7 @@ import numpy as np
 
 
 from mtorch.config import Device, to_cpu
-from mtorch.nn import Module, Linear, LayerNorm, Embedding
+from mtorch.nn import Module, Linear, LayerNorm, Embedding, RMSNorm
 from mtorch.tensor import Tensor
 
 
@@ -73,6 +73,11 @@ class MultiHeadAttention(Module):
         K_data = K.data.reshape(B, seq_len_k, self.num_heads, self.head_dim)
         V_data = V.data.reshape(B, seq_len_k, self.num_heads, self.head_dim)
 
+        if freqs_cos is not None and freqs_sin is not None:
+            Q_data = self.apply_rope_to_data(Q_data, freqs_cos, freqs_sin)
+            K_data = self.apply_rope_to_data(K_data, freqs_cos, freqs_sin)
+
+
         # for multiplication per head
         Q_data = Q_data.transpose(0, 2, 1, 3)
         K_data = K_data.transpose(0, 2, 1, 3)
@@ -126,12 +131,20 @@ class MultiHeadAttention(Module):
                 d_scores = d_scores * scale_factor
 
                 dQ = d_scores @ K_data
-                dK = d_scores.swapaxes(-1, -2) @ Q_data
+                dK = d_scores.swapaxes(-1, 2) @ Q_data
 
-                dQ = dQ.transpose(0, 2, 1, 3).reshape(B, seq_len, self.d_model)
-                dK = dK.transpose(0, 2, 1, 3).reshape(B, seq_len_k, self.d_model)
-                dV = dV.transpose(0, 2, 1, 3).reshape(B, seq_len_k, self.d_model)
+                dQ_reshaped = dQ.transpose(0, 2, 1, 3)
+                dK_reshaped = dK.transpose(0, 2, 1, 3)
+                dV_reshaped = dV.transpose(0, 2, 1, 3)
 
+                if freqs_cos is not None and freqs_sin is not None:
+                    dQ_reshaped = self.apply_rope_inverse(dQ_reshaped, freqs_cos, freqs_sin)
+                    dK_reshaped = self.apply_rope_inverse(dK_reshaped, freqs_cos, freqs_sin)
+
+                dQ = dQ_reshaped.reshape(B, seq_len, self.d_model)
+                dK = dK_reshaped.reshape(B, seq_len_k, self.d_model)
+                dV = dV_reshaped.reshape(B, seq_len_k, self.d_model)
+                
                 if Q.requires_grad:
                     Q._accumulate_grad(dQ)
                 if K.requires_grad:
@@ -228,15 +241,15 @@ class TransformerEncoderBlock(Module):
         super().__init__()
 
         self.attention = MultiHeadAttention(d_model, num_heads)
-        self.norm1 = LayerNorm(d_model)
+        self.norm1 = RMSNorm(d_model)
 
         self.ff = FeedForward2(d_model, d_ff)
-        self.norm2 = LayerNorm(d_model)
+        self.norm2 = RMSNorm(d_model)
 
-    def __call__(self, x, mask=None):
+    def __call__(self, x, mask=None , freqs_cos = None, freqs_sin = None):
 
         norm_x1 = self.norm1(x)
-        attn_out = self.attention(norm_x1, norm_x1, norm_x1, mask)
+        attn_out = self.attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
         x = x + attn_out  # residual connection
 
         norm_x2 = self.norm2(x)
@@ -260,18 +273,18 @@ class TransformerDecoderBlock(Module):
         super().__init__()
 
         self.self_attention = MultiHeadAttention(d_model, num_heads)
-        self.norm1 = LayerNorm(d_model)
+        self.norm1 = RMSNorm(d_model)
 
         self.cross_attention = MultiHeadAttention(d_model, num_heads)
-        self.norm2 = LayerNorm(d_model)
+        self.norm2 = RMSNorm(d_model)
 
         self.ff = FeedForward2(d_model, d_ff)
-        self.norm3 = LayerNorm(d_model)
+        self.norm3 = RMSNorm(d_model)
 
-    def __call__(self, x, enc_out, mask=None):
+    def __call__(self, x, enc_out, mask=None,  freqs_cos = None, freqs_sin = None):
 
         norm_x1 = self.norm1(x)
-        attn_out = self.self_attention(norm_x1, norm_x1, norm_x1, mask)
+        attn_out = self.self_attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
         x = x + attn_out  # residual connection
 
         norm_x2 = self.norm2(x)
@@ -302,13 +315,14 @@ def _get_causal_mask(seq_len):
 
 class Seq2SeqTransformer(Module):
 
-    def __init__(self, vocab_size, d_model, num_heads, num_layers=1):
+    def __init__(self, vocab_size, d_model, num_heads, num_layers=1, max_seq_len = 8192):
         super().__init__()
 
         self.enc_emb = Embedding(vocab_size, d_model)
         self.dec_emb = Embedding(vocab_size, d_model)
 
-        self.pos_enc = PositionalEncoding(d_model)
+        head_dim = d_model // num_heads
+        self.freqs_cos, self.freqs_sin = self.precompute_freqs_cis(head_dim, max_seq_len=max_seq_len)
 
         self.encoding_layers = [
             TransformerEncoderBlock(d_model, num_heads) for _ in range(num_layers)
@@ -325,14 +339,14 @@ class Seq2SeqTransformer(Module):
         target_mask = _get_causal_mask(trg_seq_len)
 
         # Encoder
-        enc_x = self.pos_enc(self.enc_emb(src))
+        enc_x = self.enc_emb(src)
         for layer in self.encoding_layers:
-            enc_x = layer(enc_x, mask=None)
+            enc_x = layer(enc_x, mask=None, freqs_cos=self.freqs_cos,freqs_sin= self.freqs_sin)
 
         # dec
-        dec_x = self.pos_enc(self.dec_emb(trg))
+        dec_x = self.dec_emb(trg)
         for layer in self.decoding_layers:
-            dec_x = layer(dec_x, enc_out=enc_x, mask=target_mask)
+            dec_x = layer(dec_x, enc_out=enc_x, mask=target_mask , freqs_cos=self.freqs_cos,freqs_sin= self.freqs_sin)
 
         # final output
         logits = self.fc_out(dec_x)
@@ -344,9 +358,9 @@ class Seq2SeqTransformer(Module):
     def generate(self, src, max_len=15, sos_index=None, eos_index=None):
         self.eval()
 
-        enc_x = self.pos_enc(self.enc_emb(src))
+        enc_x = self.enc_emb(src)
         for layer in self.encoding_layers:
-            enc_x = layer(enc_x, mask=None)
+            enc_x = layer(enc_x, mask=None, freqs_cos=self.freqs_cos,freqs_sin= self.freqs_sin)
 
         trg_indexes = [sos_index]
 
@@ -354,9 +368,9 @@ class Seq2SeqTransformer(Module):
             trg_tensor = Tensor([trg_indexes], requires_grad=False)
             mask = _get_causal_mask(len(trg_indexes))
 
-            dec_x = self.pos_enc(self.dec_emb(trg_tensor))
+            dec_x = self.dec_emb(trg_tensor)
             for layer in self.decoding_layers:
-                dec_x = layer(dec_x, enc_out=enc_x, mask=mask)
+                dec_x = layer(dec_x, enc_out=enc_x, mask=mask , freqs_cos=self.freqs_cos,freqs_sin= self.freqs_sin)
 
             logits = self.fc_out(dec_x)
 
@@ -381,15 +395,23 @@ class Seq2SeqTransformer(Module):
             params += layer.parameters()
         return params
 
+    def precompute_freqs_cis(self, dim, max_seq_len=8192, theta= 10000.0):
+        xp = Device.xp
+        freqs = 1.0 / (theta ** (xp.arange(0, dim, 2)[: (dim // 2)].astype(xp.float32) / dim))
+
+        t = xp.arange(max_seq_len, dtype=xp.float32)
+        freqs = xp.outer(t, freqs)
+        return xp.cos(freqs), xp.sin(freqs)
 
 class CausalTransformer(Module):
 
-    def __init__(self, vocab_size, d_model, num_heads, num_layers=2):
+    def __init__(self, vocab_size, d_model, num_heads, num_layers=2, max_seq_len=8192):
         super().__init__()
 
         self.emb = Embedding(vocab_size, d_model)
 
-        self.pos_enc = PositionalEncoding(d_model)
+        head_dim = d_model // num_heads
+        self.freqs_cos, self.freqs_sin = self.precompute_freqs_cis(head_dim, max_seq_len=max_seq_len)
 
         self.layers = [
             TransformerEncoderBlock(d_model, num_heads) for _ in range(num_layers)
@@ -408,9 +430,9 @@ class CausalTransformer(Module):
             self._cached_mask = _get_causal_mask(seq_len)
             self._cached_mask_len = seq_len
 
-        out = self.pos_enc(self.emb(x))
+        out = self.emb(x)
         for layer in self.layers:
-            out = layer(out, mask=self._cached_mask)
+            out = layer(out, mask=self._cached_mask , freqs_cos=self.freqs_cos, freqs_sin=self.freqs_sin)
 
         return self.fc_out(out)
 
@@ -428,9 +450,9 @@ class CausalTransformer(Module):
             x_tensor = Tensor([trg_indexes], requires_grad=False)
             mask = _get_causal_mask(len(trg_indexes))
 
-            out = self.pos_enc(self.emb(x_tensor))
+            out = self.emb(x_tensor)
             for layer in self.layers:
-                out = layer(out, mask=mask)
+                out = layer(out, mask=mask, freqs_cos=self.freqs_cos, freqs_sin=self.freqs_sin)
 
             logits = self.fc_out(out)
             logits_cpu = to_cpu(logits.data)
@@ -448,3 +470,12 @@ class CausalTransformer(Module):
         for layer in self.layers:
             params += layer.parameters()
         return params
+
+    def precompute_freqs_cis(self, dim, max_seq_len=8192, theta= 10000.0):
+
+        xp = Device.xp
+        freqs = 1.0 / (theta ** (xp.arange(0, dim, 2)[: (dim // 2)].astype(xp.float32) / dim))
+
+        t = xp.arange(max_seq_len, dtype=xp.float32)
+        freqs = xp.outer(t, freqs)
+        return xp.cos(freqs), xp.sin(freqs)
