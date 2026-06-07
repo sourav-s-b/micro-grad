@@ -125,7 +125,7 @@ def train_model():
             break
 
 
-# train_model()
+train_model()
 
 
 def chat_with_bot(

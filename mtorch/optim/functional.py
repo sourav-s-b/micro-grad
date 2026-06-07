@@ -34,6 +34,16 @@ def cross_entropy_loss(logits, targets):
     B = logits.shape[0]
     V = logits.shape[1]
 
+    if type(logits).__name__ == "Tensor":
+        logits_data = logits.data
+    else:
+        logits_data = logits
+
+    if type(targets).__name__ == "Tensor":
+        targets_data = targets.data
+    else:
+        targets_data = targets
+
     probs = xp.array(logits.data, copy=True)
     logits_max = xp.max(probs, axis=-1, keepdims=True)
     probs -= logits_max
@@ -42,7 +52,7 @@ def cross_entropy_loss(logits, targets):
     probs /= sum_exp
 
     batch_indices = xp.arange(B)
-    correct_probs = probs[batch_indices, targets.data.astype(xp.int32)]
+    correct_probs = probs[batch_indices, targets_data.astype(xp.int32)]
     loss_val = -xp.sum(xp.log(correct_probs + 1e-8)) / B
 
     out = Tensor(
