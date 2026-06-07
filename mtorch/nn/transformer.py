@@ -57,7 +57,7 @@ class MultiHeadAttention(Module):
 
         self._cached_parameters = None
 
-    def __call__(self, q, k, v, mask=None), freqs_cos=None, freqs_sin=None:
+    def __call__(self, q, k, v, mask=None, freqs_cos=None, freqs_sin=None):
 
         B, seq_len, _ = q.shape  # (batch , seq_len , d_model)
         _, seq_len_k, _ = k.shape
