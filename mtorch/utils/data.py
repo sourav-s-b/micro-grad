@@ -40,12 +40,13 @@ class DataLoader:
         batch_idx = self.indices[self.idx : self.idx + self.batch_size]
         self.idx += self.batch_size
 
-        samples = [self.dataset[s] for s in batch_idx]
-        batch_x = np.array([to_cpu(s[0]) for s in samples])
-        batch_y = np.array([to_cpu(s[1]) for s in samples])
+        batch = [self.dataset[i] for i in batch_idx]
 
-        return Tensor(batch_x, requires_grad=False), Tensor(
-            batch_y, requires_grad=False
+        X_batch = np.stack([item[0] for item in batch])
+        Y_batch = np.stack([item[1] for item in batch])
+
+        return Tensor(X_batch, requires_grad=False), Tensor(
+            Y_batch, requires_grad=False
         )
 
     def __len__(self):
