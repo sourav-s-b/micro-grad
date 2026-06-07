@@ -16,7 +16,7 @@ class Tensor:
         self._prev = tuple(_children)
         self._op = _op
         self._backward = lambda: None
-        self.requires_grad = requires_grad
+        self.requires_grad = requires_grad and not Device.no_grad
 
     def zero_grad(self):
         if self.grad is not None:

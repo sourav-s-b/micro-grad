@@ -2,8 +2,6 @@ from mtorch.config import Device
 from mtorch.nn.base import Module
 from mtorch.tensor import Tensor
 
-from cupyx import scatter_add
-
 
 class Embedding(Module):
 
@@ -41,6 +39,7 @@ class Embedding(Module):
             flat_grad = out.grad.reshape(-1, self.embedding_dim)
 
             if Device.device == "cuda":
+                from cupyx import scatter_add
 
                 scatter_add(dW, flat_idx, flat_grad)
             else:

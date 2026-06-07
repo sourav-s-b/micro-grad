@@ -5,6 +5,7 @@ import numpy as np
 class Device:
     xp: types.ModuleType = np
     device = "cpu"
+    no_grad = False
 
 
 def set_device(name):
@@ -28,3 +29,13 @@ def to_cpu(array):
     if Device.device == "cuda" and hasattr(array, "get"):
         return array.get()
     return array
+
+
+class no_grad:
+
+    def __enter__(self):
+        self.prev = Device.no_grad
+        Device.no_grad = True
+
+    def __exit__(self, exc_type, exc_value, tracback):
+        Device.no_grad = self.prev
