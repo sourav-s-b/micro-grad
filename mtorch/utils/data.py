@@ -67,8 +67,16 @@ class PrefetchedDataLoader:
         def worker():
             for X, Y in self.dataloader:
 
-                X_gpu = xp.array(X)
-                Y_gpu = xp.array(Y)
+                if hasattr(X, "data"):
+                    X = X.data
+                if hasattr(Y, "data"):
+                    Y = Y.data
+
+                X_np = np.stack(X) if isinstance(X, list) else np.asarray(X)
+                Y_np = np.stack(Y) if isinstance(Y, list) else np.asarray(Y)
+
+                X_gpu = xp.array(X_np.astype(np.int32))
+                Y_gpu = xp.array(Y_np.astype(np.int32))
 
                 q.put((X_gpu, Y_gpu))
 
