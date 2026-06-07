@@ -73,7 +73,7 @@ def cross_entropy_loss(logits, targets):
 
                 kernel(
                     probs,
-                    targets.data.astype(xp.int32),
+                    targets_data.astype(xp.int32),
                     out.grad,
                     B,
                     V,
