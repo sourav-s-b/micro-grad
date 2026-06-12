@@ -3,6 +3,7 @@ import numpy as np
 
 from mtorch.config import Device, to_cpu
 from mtorch.nn import Module, Linear, LayerNorm, Embedding, RMSNorm
+from mtorch.optim.functional import checkpoint
 from mtorch.tensor import Tensor
 
 
@@ -248,13 +249,18 @@ class TransformerEncoderBlock(Module):
 
     def __call__(self, x, mask=None , freqs_cos = None, freqs_sin = None):
 
-        norm_x1 = self.norm1(x)
-        attn_out = self.attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
-        x = x + attn_out  # residual connection
+        def attn_block(hidden_state):
+            norm_x1 = self.norm1(hidden_state)
+            attn_out = self.attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
+            return hidden_state + attn_out
+        x = checkpoint(attn_block , x) 
 
-        norm_x2 = self.norm2(x)
-        ff_out = self.ff(norm_x2)
-        x = x + ff_out
+        def ff_block_fn(hidden_state):
+            norm_x2 = self.norm2(hidden_state)
+            ff_out = self.ff(norm_x2)
+            return hidden_state + ff_out  # residual connection
+
+        x = checkpoint(ff_block_fn, x)
 
         return x
 
@@ -283,17 +289,22 @@ class TransformerDecoderBlock(Module):
 
     def __call__(self, x, enc_out, mask=None,  freqs_cos = None, freqs_sin = None):
 
-        norm_x1 = self.norm1(x)
-        attn_out = self.self_attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
-        x = x + attn_out  # residual connection
+        def attn_block(hidden_state):
+            norm_x1 = self.norm1(hidden_state)
+            return hidden_state + self.self_attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
+        x = checkpoint(attn_block, x)
 
-        norm_x2 = self.norm2(x)
-        cross_out = self.cross_attention(norm_x2, enc_out, enc_out, mask=None)
-        x = x + cross_out
+        def cross_attn_block(hidden_state):
+            norm_x2 = self.norm2(hidden_state)
+            return hidden_state + self.cross_attention(norm_x2, enc_out, enc_out, mask=None)
+        x = checkpoint(cross_attn_block, x) 
 
-        norm_x3 = self.norm3(x)
-        ff_out = self.ff(norm_x3)
-        x = x + ff_out
+        def ff_block_fn(hidden_state):
+            norm_x3 = self.norm3(hidden_state)
+            ff_out = self.ff(norm_x3)
+            return hidden_state + ff_out  # residual connection
+
+        x = checkpoint(ff_block_fn, x)
 
         return x
 

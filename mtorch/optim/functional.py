@@ -160,4 +160,39 @@ def clip_gradients(parameters, max_norm=1.0):
     if clip_coef < 1.0:
         for p in parameters:
             if p.grad is not None:
+
                 p.grad *= clip_coef
+
+
+def checkpoint(layer_function, x):
+
+    Device.no_grad = True
+    detached_output = layer_function(x)
+    Device.no_grad = False
+
+    out = Tensor(
+        detached_output.data,
+        _children=(x,),
+        _op="checkpoint",
+        requires_grad=x.requires_grad,
+    )
+
+    if out.requires_grad:
+
+        def _backward():
+            if out.grad is None:
+                return
+
+            Device.no_grad = False
+
+            recomputed_out = layer_function(x)
+
+            recomputed_out.grad = out.grad
+
+            recomputed_out.backward()
+
+            del recomputed_out
+
+        out._backward = _backward
+
+    return out

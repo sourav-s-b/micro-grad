@@ -447,17 +447,11 @@ class Tensor:
 
 
 
-    def backward(self, cached_topo = None):
+    def backward(self):
         if not self.requires_grad:
             return
         if self.data.size != 1:
             raise RuntimeError("Grad can only be implicitly created for scalar outputs")
-
-        if cached_topo is not None:
-            self.grad = self.xp.ones_like(self.data)
-            for node in reversed(cached_topo):
-                node._backward()
-            return cached_topo
 
         topo = []
         visited = set()
