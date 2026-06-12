@@ -497,14 +497,3 @@ class Tensor:
     def __repr__(self):
         return f"Tensor(shape={self.shape}, data=\n{self.data}), op={self._op}"
 
-
-@Device.xp.fuse()
-def fused_silu(x):
-    return x * (1.0 / 1.0 + Device.xp.exp(-x))
-
-@Device.xp.fuse()
-def fused_silu_grad(grad , x):
-    sigmoid = (1.0 / 1.0 + Device.xp.exp(-x))
-    dx = sigmoid + (x * sigmoid ) * (1.0 - sigmoid)
-    return grad * dx
-    
