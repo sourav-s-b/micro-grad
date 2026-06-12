@@ -1,3 +1,4 @@
+from numpy import gradient
 from mtorch.config import Device
 
 from mtorch.tensor import Tensor
@@ -189,7 +190,7 @@ def checkpoint(layer_function, x):
 
             recomputed_out.grad = out.grad
 
-            recomputed_out.backward()
+            recomputed_out.backward(gradient=out.grad)
 
             del recomputed_out
 

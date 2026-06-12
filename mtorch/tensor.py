@@ -389,8 +389,8 @@ class Tensor:
     def silu(self):
         xp = Device.xp
 
-        sigmoid = 1.0 / (1.0 + xp.exp(-self.data))
-        out_data = self.data * sigmoid
+        
+        out_data = fused_silu(self.data)
 
         out = Tensor(out_data, (self, ) , 'SiLU', requires_grad=self.requires_grad)
 
@@ -398,8 +398,8 @@ class Tensor:
             def _backward():
                 if out.grad is None: return
 
-                dx = sigmoid + out_data * (1.0 - sigmoid)
-                self._accumulate_grad(out.grad * dx)
+                grad_update = fused_silu_grad(out.grad, self.data) 
+                self._accumulate_grad(grad_update)
 
             out._backward = _backward
         return out
@@ -447,10 +447,14 @@ class Tensor:
 
 
 
-    def backward(self):
+    def backward(self, gradient=None):
         if not self.requires_grad:
             return
-        if self.data.size != 1:
+
+        if gradient is None:
+            self.grad = gradient
+
+        if self.data.size != 1 and self.grad is None:
             raise RuntimeError("Grad can only be implicitly created for scalar outputs")
 
         topo = []
@@ -472,7 +476,8 @@ class Tensor:
                     topo.append(node)
                 stack.pop()
 
-        self.grad = self.xp.ones_like(self.data)
+        if self.grad is None:
+            self.grad = self.xp.ones_like(self.data)
 
         for node in reversed(topo):
             node._backward()
@@ -518,3 +523,14 @@ class Tensor:
     def __repr__(self):
         return f"Tensor(shape={self.shape}, data=\n{self.data}), op={self._op}"
 
+
+@Device.xp.fuse()
+def fused_silu(x):
+    return x * (1.0 / 1.0 + Device.xp.exp(-x))
+
+@Device.xp.fuse()
+def fused_silu_grad(grad , x):
+    sigmoid = (1.0 / 1.0 + Device.xp.exp(-x))
+    dx = sigmoid + (x * sigmoid ) * (1.0 - sigmoid)
+    return grad * dx
+    
