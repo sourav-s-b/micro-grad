@@ -11,7 +11,7 @@ import numpy as np
 
 from mtorch.config import set_device, Device, to_cpu
 
-# set_device("cuda")
+set_device("cuda")
 
 
 class CancerDataset(Dataset):
