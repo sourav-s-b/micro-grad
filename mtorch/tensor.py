@@ -1,4 +1,5 @@
 from mtorch.config import Device
+from mtorch import kernels
 
 import numpy as np
 
@@ -324,83 +325,56 @@ class Tensor:
     # activation function
 
     def log(self):
-        out = Tensor( self.xp.log(self.data + 1e-15), (self,), 'log', requires_grad= self.requires_grad)
-
+        out = Tensor(kernels.log_fwd(self.xp, self.data), (self,), 'log', requires_grad=self.requires_grad)
         if self.requires_grad:
             def _backward():
-                if out.grad is None:
-                    return
-                self._accumulate_grad(out.grad / (self.data + 1e-15))
-
+                if out.grad is not None:
+                    self._accumulate_grad(kernels.log_bwd(self.xp, out.grad, self.data))
             out._backward = _backward
-
         return out
 
     def exp(self):
-        out = Tensor(self.xp.exp(self.data), (self,) , 'exp' , requires_grad=self.requires_grad)
-
+        out = Tensor(kernels.exp_fwd(self.xp, self.data), (self,), 'exp', requires_grad=self.requires_grad)
         if self.requires_grad:
             def _backward():
-                if out.grad is None:
-                    return
-                self._accumulate_grad(out.grad * out.data)
-
+                if out.grad is not None:
+                    self._accumulate_grad(kernels.exp_bwd(self.xp, out.grad, self.data))
             out._backward = _backward
-
         return out
-    
+        
     def sigmoid(self):
-        res = 1.0 / (1.0 + self.xp.exp(-self.xp.clip(self.data , -500, 500)))
-        out = Tensor(res, (self,) , 'sigmoid' , requires_grad=self.requires_grad)
-
+        out = Tensor(kernels.sigmoid_fwd(self.xp, self.data), (self,), 'sigmoid', requires_grad=self.requires_grad)
         if self.requires_grad:
             def _backward():
-                if out.grad is None:
-                    return
-                self._accumulate_grad(out.grad * out.data *  (1 - out.data) )
+                if out.grad is not None:
+                    self._accumulate_grad(kernels.sigmoid_bwd(self.xp, out.grad, self.data))
             out._backward = _backward
         return out
 
     def tanh(self):
-        out = Tensor(self.xp.tanh(self.data), (self,) , 'tanh' , requires_grad= self.requires_grad)
-
+        out = Tensor(kernels.tanh_fwd(self.xp, self.data), (self,), 'tanh', requires_grad=self.requires_grad)
         if self.requires_grad:
             def _backward():
-                if out.grad is None:
-                    return
-                self._accumulate_grad((1 - out.data ** 2) * out.grad)
-
+                if out.grad is not None:
+                    self._accumulate_grad(kernels.tanh_bwd(self.xp, out.grad, self.data))
             out._backward = _backward
-
         return out
 
     def relu(self):
-        out = Tensor(self.xp.maximum(0, self.data),(self,) , 'ReLU' , requires_grad= self.requires_grad)
-
+        out = Tensor(kernels.relu_fwd(self.xp, self.data), (self,), 'ReLU', requires_grad=self.requires_grad)
         if self.requires_grad:
             def _backward():
-                if out.grad is None:
-                    return 
-                self._accumulate_grad((self.data > 0) * out.grad)
+                if out.grad is not None:
+                    self._accumulate_grad(kernels.relu_bwd(self.xp, out.grad, self.data))
             out._backward = _backward
-
         return out
 
     def silu(self):
-        xp = Device.xp
-
-        
-        out_data = fused_silu(self.data)
-
-        out = Tensor(out_data, (self, ) , 'SiLU', requires_grad=self.requires_grad)
-
+        out = Tensor(kernels.silu_fwd(self.xp, self.data), (self,), 'SiLU', requires_grad=self.requires_grad)
         if self.requires_grad:
             def _backward():
-                if out.grad is None: return
-
-                grad_update = fused_silu_grad(out.grad, self.data) 
-                self._accumulate_grad(grad_update)
-
+                if out.grad is not None:
+                    self._accumulate_grad(kernels.silu_bwd(self.xp, out.grad, self.data))
             out._backward = _backward
         return out
 
@@ -451,7 +425,7 @@ class Tensor:
         if not self.requires_grad:
             return
 
-        if gradient is None:
+        if gradient is not None:
             self.grad = gradient
 
         if self.data.size != 1 and self.grad is None:
