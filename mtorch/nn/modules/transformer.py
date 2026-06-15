@@ -3,8 +3,8 @@ import numpy as np
 
 from mtorch.config import Device, to_cpu
 from mtorch.nn import Module, Linear, LayerNorm, Embedding, RMSNorm
-from mtorch.optim.functional import checkpoint
-from mtorch.tensor import Tensor
+from mtorch.tensor_compiled import Tensor
+from mtorch.nn.functional import core as F_core
 
 
 class PositionalEncoding(Module):
@@ -40,9 +40,7 @@ class PositionalEncoding(Module):
 
 
 class MultiHeadAttention(Module):
-
     def __init__(self, d_model, num_heads):
-
         super().__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
 
@@ -53,144 +51,51 @@ class MultiHeadAttention(Module):
         self.q_linear = Linear(d_model, d_model)
         self.k_linear = Linear(d_model, d_model)
         self.v_linear = Linear(d_model, d_model)
-
         self.out_linear = Linear(d_model, d_model)
 
-        self._cached_parameters = None
-
     def __call__(self, q, k, v, mask=None, freqs_cos=None, freqs_sin=None):
-
-        B, seq_len, _ = q.shape  # (batch , seq_len , d_model)
+        B, seq_len, _ = q.shape
         _, seq_len_k, _ = k.shape
-        xp = Device.xp
 
-        # Project to matrices
         Q = self.q_linear(q)
         K = self.k_linear(k)
         V = self.v_linear(v)
 
-        # split to multiple heads
-        Q_data = Q.data.reshape(B, seq_len, self.num_heads, self.head_dim)
-        K_data = K.data.reshape(B, seq_len_k, self.num_heads, self.head_dim)
-        V_data = V.data.reshape(B, seq_len_k, self.num_heads, self.head_dim)
+        # Pure tensor reshape operations tracked by GraphEngine
+        Q = Q.reshape(B, seq_len, self.num_heads, self.head_dim)
+        K = K.reshape(B, seq_len_k, self.num_heads, self.head_dim)
+        V = V.reshape(B, seq_len_k, self.num_heads, self.head_dim)
 
         if freqs_cos is not None and freqs_sin is not None:
-            Q_data = self.apply_rope_to_data(Q_data, freqs_cos, freqs_sin)
-            K_data = self.apply_rope_to_data(K_data, freqs_cos, freqs_sin)
+            Q = F_core.apply_rope(Q, freqs_cos, freqs_sin)
+            K = F_core.apply_rope(K, freqs_cos, freqs_sin)
 
-
-        # for multiplication per head
-        Q_data = Q_data.transpose(0, 2, 1, 3)
-        K_data = K_data.transpose(0, 2, 1, 3)
-        V_data = V_data.transpose(0, 2, 1, 3)
-
-        # dot-product attention (b, num_heads, Seq_Len , seq_len)
+        Q = Q.transpose(0, 2, 1, 3)
+        K = K.transpose(0, 2, 1, 3)
+        V = V.transpose(0, 2, 1, 3)
 
         scale_factor = 1.0 / np.sqrt(self.head_dim)
-        scores = (Q_data @ K_data.swapaxes(-1, -2)) * scale_factor
+
+        # Tensor matrix multiplication auto-diffed by the tape!
+        scores = (Q @ K.transpose(0, 1, 3, 2)) * scale_factor
 
         if mask is not None:
-            # something about the not cheating for decoder
-            mask_data = mask.data if hasattr(mask, "data") else mask
-            scores = scores + mask_data
+            scores = scores + mask
 
-        max_val = xp.max(scores, axis=-1, keepdims=True)
-        exp_scores = xp.exp(scores - max_val)
-        probs = exp_scores / xp.sum(exp_scores, axis=-1, keepdims=True)
+        probs = scores.softmax(axis=-1)
+        context = probs @ V
 
-        context = probs @ V_data
+        context = context.transpose(0, 2, 1, 3).reshape(B, seq_len, self.d_model)
 
-        # reversing the transpose
-        context = context.transpose(0, 2, 1, 3)
-
-        # reversing the reshape
-        context = context.reshape(B, seq_len, self.d_model)
-
-        # for optimization , just gonna right the bacward manually
-
-        requires_grad = Q.requires_grad or K.requires_grad or V.requires_grad
-        out = Tensor(
-            context, (Q, K, V), _op="FusedAttention", requires_grad=requires_grad
-        )
-
-        if requires_grad:
-
-            def _backward():
-                if out.grad is None:
-                    return
-
-                d_context = out.grad.reshape(
-                    B, seq_len, self.num_heads, self.head_dim
-                ).transpose(0, 2, 1, 3)
-
-                dV = probs.swapaxes(-1, -2) @ d_context
-                dP = d_context @ V_data.swapaxes(-1, -2)
-
-                sum_dP_P = xp.sum(dP * probs, axis=-1, keepdims=True)
-                d_scores = probs * (dP - sum_dP_P)
-
-                d_scores = d_scores * scale_factor
-
-                dQ = d_scores @ K_data
-                dK = d_scores.swapaxes(-1, 2) @ Q_data
-
-                dQ_reshaped = dQ.transpose(0, 2, 1, 3)
-                dK_reshaped = dK.transpose(0, 2, 1, 3)
-                dV_reshaped = dV.transpose(0, 2, 1, 3)
-
-                if freqs_cos is not None and freqs_sin is not None:
-                    dQ_reshaped = self.apply_rope_inverse(dQ_reshaped, freqs_cos, freqs_sin)
-                    dK_reshaped = self.apply_rope_inverse(dK_reshaped, freqs_cos, freqs_sin)
-
-                dQ = dQ_reshaped.reshape(B, seq_len, self.d_model)
-                dK = dK_reshaped.reshape(B, seq_len_k, self.d_model)
-                dV = dV_reshaped.reshape(B, seq_len_k, self.d_model)
-                
-                if Q.requires_grad:
-                    Q._accumulate_grad(dQ)
-                if K.requires_grad:
-                    K._accumulate_grad(dK)
-                if V.requires_grad:
-                    V._accumulate_grad(dV)
-
-            out._backward = _backward
-
-        return self.out_linear(out)
+        return self.out_linear(context)
 
     def parameters(self):
-        if self._cached_parameters is None:
-            self._cached_parameters = (
-                self.q_linear.parameters()
-                + self.k_linear.parameters()
-                + self.v_linear.parameters()
-                + self.out_linear.parameters()
-            )
-        return self._cached_parameters
-
-    def apply_rope_to_data(self,x, freqs_cos, freqs_sin):
-
-        xp = Device.xp
-        x_reshaped = x.reshape(*x.shape[:-1],-1,2)
-
-        cos = freqs_cos[: x.shape[1]].reshape(1, x.shape[1],1,-1)
-        sin = freqs_sin[: x.shape[1]].reshape(1, x.shape[1], 1, -1)
-
-        x_out = xp.empty_like(x_reshaped)
-        x_out[..., 0] = x_reshaped[..., 0] * cos - x_reshaped[...,1] *sin
-        x_out[..., 1] = x_reshaped[..., 1] * cos + x_reshaped[...,0] *sin
-        return x_out.reshape(x.shape)
-
-    def apply_rope_inverse(self,dx, freqs_cos, freqs_sin):
-        xp = Device.xp
-        dx_reshaped = dx.reshape(*dx.shape[: -1], -1, 2)
-
-        cos = freqs_cos[: dx.shape[1]].reshape(1, dx.shape[1],1,-1)
-        sin = freqs_sin[: dx.shape[1]].reshape(1, dx.shape[1], 1, -1)
-
-        dx_out = xp.empty_like(dx_reshaped)
-        dx_out[..., 0] = dx_reshaped[..., 0] * cos + dx_reshaped[...,1] *sin
-        dx_out[..., 1] = dx_reshaped[..., 1] * cos - dx_reshaped[...,0] *sin
-        return dx_out.reshape(dx.shape)
+        return (
+            self.q_linear.parameters()
+            + self.k_linear.parameters()
+            + self.v_linear.parameters()
+            + self.out_linear.parameters()
+        )
 
 
 class FeedForward(Module):
@@ -212,16 +117,17 @@ class FeedForward(Module):
     def parameters(self):
         return self.linear1.parameters() + self.linear2.parameters()
 
+
 class FeedForward2(Module):
 
     def __init__(self, d_model, d_ff=None):
         super().__init__()
 
         if d_ff is None:
-            d_ff = int(8 * d_model/3)
+            d_ff = int(8 * d_model / 3)
             d_ff = 256 * ((d_ff + 255) // 256)
 
-        self.w1 = Linear(d_model, d_ff) 
+        self.w1 = Linear(d_model, d_ff)
         self.w2 = Linear(d_ff, d_model)
         self.w3 = Linear(d_model, d_ff)
 
@@ -247,20 +153,15 @@ class TransformerEncoderBlock(Module):
         self.ff = FeedForward2(d_model, d_ff)
         self.norm2 = RMSNorm(d_model)
 
-    def __call__(self, x, mask=None , freqs_cos = None, freqs_sin = None):
+    def __call__(self, x, mask=None, freqs_cos=None, freqs_sin=None):
 
-        def attn_block(hidden_state):
-            norm_x1 = self.norm1(hidden_state)
-            attn_out = self.attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
-            return hidden_state + attn_out
-        x = checkpoint(attn_block , x) 
+        norm_x1 = self.norm1(x)
+        attn_out = self.attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
+        x += attn_out
 
-        def ff_block_fn(hidden_state):
-            norm_x2 = self.norm2(hidden_state)
-            ff_out = self.ff(norm_x2)
-            return hidden_state + ff_out  # residual connection
-
-        x = checkpoint(ff_block_fn, x)
+        norm_x2 = self.norm2(x)
+        ff_out = self.ff(norm_x2)
+        x += ff_out  # residual connection
 
         return x
 
@@ -287,24 +188,17 @@ class TransformerDecoderBlock(Module):
         self.ff = FeedForward2(d_model, d_ff)
         self.norm3 = RMSNorm(d_model)
 
-    def __call__(self, x, enc_out, mask=None,  freqs_cos = None, freqs_sin = None):
+    def __call__(self, x, enc_out, mask=None, freqs_cos=None, freqs_sin=None):
 
-        def attn_block(hidden_state):
-            norm_x1 = self.norm1(hidden_state)
-            return hidden_state + self.self_attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
-        x = checkpoint(attn_block, x)
+        norm_x1 = self.norm1(x)
+        x += self.self_attention(norm_x1, norm_x1, norm_x1, mask, freqs_cos, freqs_sin)
 
-        def cross_attn_block(hidden_state):
-            norm_x2 = self.norm2(hidden_state)
-            return hidden_state + self.cross_attention(norm_x2, enc_out, enc_out, mask=None)
-        x = checkpoint(cross_attn_block, x) 
+        norm_x2 = self.norm2(x)
+        x += self.cross_attention(norm_x2, enc_out, enc_out, mask=None)
 
-        def ff_block_fn(hidden_state):
-            norm_x3 = self.norm3(hidden_state)
-            ff_out = self.ff(norm_x3)
-            return hidden_state + ff_out  # residual connection
-
-        x = checkpoint(ff_block_fn, x)
+        norm_x3 = self.norm3(x)
+        ff_out = self.ff(norm_x3)
+        x += ff_out  # residual connection
 
         return x
 
@@ -326,14 +220,16 @@ def _get_causal_mask(seq_len):
 
 class Seq2SeqTransformer(Module):
 
-    def __init__(self, vocab_size, d_model, num_heads, num_layers=1, max_seq_len = 8192):
+    def __init__(self, vocab_size, d_model, num_heads, num_layers=1, max_seq_len=8192):
         super().__init__()
 
         self.enc_emb = Embedding(vocab_size, d_model)
         self.dec_emb = Embedding(vocab_size, d_model)
 
         head_dim = d_model // num_heads
-        self.freqs_cos, self.freqs_sin = self.precompute_freqs_cis(head_dim, max_seq_len=max_seq_len)
+        self.freqs_cos, self.freqs_sin = self.precompute_freqs_cis(
+            head_dim, max_seq_len=max_seq_len
+        )
 
         self.encoding_layers = [
             TransformerEncoderBlock(d_model, num_heads) for _ in range(num_layers)
@@ -352,12 +248,20 @@ class Seq2SeqTransformer(Module):
         # Encoder
         enc_x = self.enc_emb(src)
         for layer in self.encoding_layers:
-            enc_x = layer(enc_x, mask=None, freqs_cos=self.freqs_cos,freqs_sin= self.freqs_sin)
+            enc_x = layer(
+                enc_x, mask=None, freqs_cos=self.freqs_cos, freqs_sin=self.freqs_sin
+            )
 
         # dec
         dec_x = self.dec_emb(trg)
         for layer in self.decoding_layers:
-            dec_x = layer(dec_x, enc_out=enc_x, mask=target_mask , freqs_cos=self.freqs_cos,freqs_sin= self.freqs_sin)
+            dec_x = layer(
+                dec_x,
+                enc_out=enc_x,
+                mask=target_mask,
+                freqs_cos=self.freqs_cos,
+                freqs_sin=self.freqs_sin,
+            )
 
         # final output
         logits = self.fc_out(dec_x)
@@ -371,7 +275,9 @@ class Seq2SeqTransformer(Module):
 
         enc_x = self.enc_emb(src)
         for layer in self.encoding_layers:
-            enc_x = layer(enc_x, mask=None, freqs_cos=self.freqs_cos,freqs_sin= self.freqs_sin)
+            enc_x = layer(
+                enc_x, mask=None, freqs_cos=self.freqs_cos, freqs_sin=self.freqs_sin
+            )
 
         trg_indexes = [sos_index]
 
@@ -381,7 +287,13 @@ class Seq2SeqTransformer(Module):
 
             dec_x = self.dec_emb(trg_tensor)
             for layer in self.decoding_layers:
-                dec_x = layer(dec_x, enc_out=enc_x, mask=mask , freqs_cos=self.freqs_cos,freqs_sin= self.freqs_sin)
+                dec_x = layer(
+                    dec_x,
+                    enc_out=enc_x,
+                    mask=mask,
+                    freqs_cos=self.freqs_cos,
+                    freqs_sin=self.freqs_sin,
+                )
 
             logits = self.fc_out(dec_x)
 
@@ -406,13 +318,16 @@ class Seq2SeqTransformer(Module):
             params += layer.parameters()
         return params
 
-    def precompute_freqs_cis(self, dim, max_seq_len=8192, theta= 10000.0):
+    def precompute_freqs_cis(self, dim, max_seq_len=8192, theta=10000.0):
         xp = Device.xp
-        freqs = 1.0 / (theta ** (xp.arange(0, dim, 2)[: (dim // 2)].astype(xp.float32) / dim))
+        freqs = 1.0 / (
+            theta ** (xp.arange(0, dim, 2)[: (dim // 2)].astype(xp.float32) / dim)
+        )
 
         t = xp.arange(max_seq_len, dtype=xp.float32)
         freqs = xp.outer(t, freqs)
         return xp.cos(freqs), xp.sin(freqs)
+
 
 class CausalTransformer(Module):
 
@@ -422,7 +337,9 @@ class CausalTransformer(Module):
         self.emb = Embedding(vocab_size, d_model)
 
         head_dim = d_model // num_heads
-        self.freqs_cos, self.freqs_sin = self.precompute_freqs_cis(head_dim, max_seq_len=max_seq_len)
+        self.freqs_cos, self.freqs_sin = self.precompute_freqs_cis(
+            head_dim, max_seq_len=max_seq_len
+        )
 
         self.layers = [
             TransformerEncoderBlock(d_model, num_heads) for _ in range(num_layers)
@@ -443,7 +360,12 @@ class CausalTransformer(Module):
 
         out = self.emb(x)
         for layer in self.layers:
-            out = layer(out, mask=self._cached_mask , freqs_cos=self.freqs_cos, freqs_sin=self.freqs_sin)
+            out = layer(
+                out,
+                mask=self._cached_mask,
+                freqs_cos=self.freqs_cos,
+                freqs_sin=self.freqs_sin,
+            )
 
         return self.fc_out(out)
 
@@ -463,7 +385,9 @@ class CausalTransformer(Module):
 
             out = self.emb(x_tensor)
             for layer in self.layers:
-                out = layer(out, mask=mask, freqs_cos=self.freqs_cos, freqs_sin=self.freqs_sin)
+                out = layer(
+                    out, mask=mask, freqs_cos=self.freqs_cos, freqs_sin=self.freqs_sin
+                )
 
             logits = self.fc_out(out)
             logits_cpu = to_cpu(logits.data)
@@ -482,10 +406,12 @@ class CausalTransformer(Module):
             params += layer.parameters()
         return params
 
-    def precompute_freqs_cis(self, dim, max_seq_len=8192, theta= 10000.0):
+    def precompute_freqs_cis(self, dim, max_seq_len=8192, theta=10000.0):
 
         xp = Device.xp
-        freqs = 1.0 / (theta ** (xp.arange(0, dim, 2)[: (dim // 2)].astype(xp.float32) / dim))
+        freqs = 1.0 / (
+            theta ** (xp.arange(0, dim, 2)[: (dim // 2)].astype(xp.float32) / dim)
+        )
 
         t = xp.arange(max_seq_len, dtype=xp.float32)
         freqs = xp.outer(t, freqs)

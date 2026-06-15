@@ -3,7 +3,7 @@ import queue
 import threading
 import math
 
-from mtorch.tensor import Tensor
+from mtorch.tensor_compiled import Tensor
 from mtorch.config import Device, to_cpu
 
 

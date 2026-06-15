@@ -1,4 +1,4 @@
-from mtorch.nn.base import Module
+from mtorch.nn import Module
 
 
 class DotProductAttention(Module):

@@ -27,6 +27,14 @@ class Module:
         for attr in self.__dict__.values():
             if isinstance(attr, Module):
                 params.extend(attr.parameters())
+            elif type(attr).__name__ == "Tensor" and attr.requires_grad:
+                params.append(attr)
+            elif isinstance(attr, list):
+                for item in attr:
+                    if isinstance(item, Module):
+                        params.extend(item.parameters())
+                    elif type(item).__name__ == "Tensor" and item.requires_grad:
+                        params.append(item)
         return params
 
 

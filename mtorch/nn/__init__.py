@@ -1,11 +1,11 @@
-from mtorch.nn.base import Module, Sequential
-from mtorch.nn.linear import Linear, Dropout
-from mtorch.nn.activations import ReLU, Tanh, Sigmoid
-from mtorch.nn.conv import Conv2D, MaxPool2D
-from mtorch.nn.rnn import LSTM
-from mtorch.nn.core import Embedding, LayerNorm, RMSNorm
-from mtorch.nn.attention import DotProductAttention
-from mtorch.nn.transformer import (
+from mtorch.nn.modules.base import Module, Sequential
+from mtorch.nn.modules.linear import Linear, Dropout
+from mtorch.nn.modules.activations import ReLU, Tanh, Sigmoid
+from mtorch.nn.modules.conv import Conv2D, MaxPool2D
+from mtorch.nn.modules.rnn import LSTM
+from mtorch.nn.modules.core import Embedding, LayerNorm, RMSNorm
+from mtorch.nn.modules.attention import DotProductAttention
+from mtorch.nn.modules.transformer import (
     MultiHeadAttention,
     FeedForward,
     TransformerEncoderBlock,
