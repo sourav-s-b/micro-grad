@@ -84,7 +84,7 @@ def cross_entropy_loss(logits, targets):
 
                 d_logits = probs
 
-                d_logits[batch_indices, targets] -= 1.0
+                d_logits[batch_indices, targets.data] -= 1.0
                 d_logits *= out.grad / B
 
             logits._accumulate_grad(d_logits)

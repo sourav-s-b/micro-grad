@@ -84,11 +84,12 @@ class LayerNorm(Module):
             def _backward():
                 if out.grad is None:
                     return
+                axes = tuple(range(x.ndim - 1))
 
                 if self.gamma.requires_grad:
-                    self.gamma._accumulate_grad((out.grad * x_norm).sum(axis=(0, 1)))
+                    self.gamma._accumulate_grad((out.grad * x_norm).sum(axis=axes))
                 if self.beta.requires_grad:
-                    self.beta._accumulate_grad((out.grad.sum(axis=(0, 1))))
+                    self.beta._accumulate_grad((out.grad.sum(axis=axes)))
                 if x.requires_grad:
 
                     g = out.grad * self.gamma.data
