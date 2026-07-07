@@ -1,5 +1,5 @@
 # Essential
-cupy-cuda13x # This depends on your version of cuda toolkit you have on your system, also you can run without this with just using numpy
+cupy-cuda12x # This depends on your version of cuda toolkit you have on your system, also you can run without this with just using numpy
 numpy
 
 # These are for the experiments.

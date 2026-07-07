@@ -1,6 +1,6 @@
 from numpy import gradient
-from mtorch.config import Device
 
+from mtorch.config import Device
 from mtorch.tensor import Tensor
 from mtorch.utils.saves import save_model
 
@@ -68,7 +68,6 @@ def cross_entropy_loss(logits, targets):
             is_cupy = hasattr(xp, "ElementwiseKernel")
 
             if is_cupy:
-
                 d_logits = xp.empty_like(probs)
                 kernel = _get_fused_ce_kernel(xp)
 
@@ -81,10 +80,9 @@ def cross_entropy_loss(logits, targets):
                     d_logits,
                 )
             else:
-
                 d_logits = probs
 
-                d_logits[batch_indices, targets.data] -= 1.0
+                d_logits[batch_indices, targets_data.astype(xp.int32)] -= 1.0
                 d_logits *= out.grad / B
 
             logits._accumulate_grad(d_logits)
@@ -94,7 +92,6 @@ def cross_entropy_loss(logits, targets):
 
 
 class EarlyStopping:
-
     def __init__(self, patience=3, min_delta=1e-4, filepath="best_model.pkl") -> None:
         self.patience = patience
         self.min_delta = min_delta
@@ -129,7 +126,7 @@ def _get_fused_ce_kernel(xp):
             operation="""
                 int row = i / vocab_size;
                 int col = i % vocab_size;
-                
+
                 T p = probs;
 
                 if (col == targets[row]){
@@ -161,7 +158,6 @@ def clip_gradients(parameters, max_norm=1.0):
     if clip_coef < 1.0:
         for p in parameters:
             if p.grad is not None:
-
                 p.grad *= clip_coef
 
 
