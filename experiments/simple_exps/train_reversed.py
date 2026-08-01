@@ -175,7 +175,7 @@ for epoch in range(epoch_range):
 
 print("Training Complete")
 
-load_model("reversed_model_1.pkl")
+load_model(model, "reversed_model_1.pkl")
 print("INFERENCE -----------(type 5-letter word or quit to exit)")
 while True:
 

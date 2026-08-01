@@ -235,7 +235,9 @@ while True:
         x_enc = Tensor(np.array([x_enc_list]), requires_grad=False)
 
         predicted_tokens = model.generate(x_enc, max_len=25)
-        resulted = "".join([inv_vocab[t] for t in predicted_tokens if t != "<PAD>"])
+        resulted = "".join(
+            [inv_vocab[t] for t in predicted_tokens if t != vocab["<PAD>"]]
+        )
 
         print(f"Result: {resulted}")
 
